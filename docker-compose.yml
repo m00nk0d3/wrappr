@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-wrappr}
       POSTGRES_USER: ${POSTGRES_USER:-wrappr}
@@ -17,6 +18,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -31,6 +33,12 @@ services:
     image: gotenberg/gotenberg:8
     ports:
       - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
