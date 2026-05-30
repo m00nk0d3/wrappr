@@ -34,7 +34,7 @@ func main() {
 	m := mailer.NewResend(cfg.ResendAPIKey)
 
 	router := buildRouter()
-	registerAuthRoutes(router, pool, m, cfg.AppURL)
+	registerAuthRoutes(router, pool, m, cfg.AppURL, cfg.JWTSecret)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
@@ -80,9 +80,11 @@ func buildRouter() *gin.Engine {
 // registerAuthRoutes adds authenticated/infrastructure routes that require
 // external dependencies (DB pool, mailer). Called from main after deps are
 // initialised so buildRouter stays independently testable.
-func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL string) {
+func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string) {
 	v1 := router.Group("/v1")
 	v1.POST("/auth/register", auth.RegisterHandler(pool, m, appURL))
+	v1.POST("/auth/magic-link", auth.MagicLinkHandler(pool, m, appURL))
+	v1.POST("/auth/verify", auth.VerifyHandler(pool, jwtSecret))
 }
 
 // healthHandler responds with a simple liveness payload.

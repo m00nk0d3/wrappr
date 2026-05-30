@@ -1,0 +1,25 @@
+package auth
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/m00nk0d3/wrappr/api/internal/db"
+)
+
+// fakeUser returns a db.User with deterministic UUIDs for use in unit tests.
+func fakeUser() db.User {
+	return db.User{
+		ID: pgtype.UUID{
+			Bytes: [16]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+				0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef},
+			Valid: true,
+		},
+		CompanyID: pgtype.UUID{
+			Bytes: [16]byte{0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10,
+				0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10},
+			Valid: true,
+		},
+		Email: "tech@example.com",
+		Name:  "Test Tech",
+		Role:  "technician",
+	}
+}

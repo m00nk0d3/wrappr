@@ -11,6 +11,7 @@ func setRequiredEnvs(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/test")
 	t.Setenv("APP_URL", "http://localhost:3001")
 	t.Setenv("RESEND_API_KEY", "re_test_key")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-32-chars-minimum!!")
 }
 
 func TestLoad_DefaultPort(t *testing.T) {
@@ -72,12 +73,13 @@ func TestLoad_InvalidPort(t *testing.T) {
 
 func TestLoad_RequiredVars(t *testing.T) {
 	cases := []struct {
-		name    string
-		unset   string
+		name  string
+		unset string
 	}{
 		{"missing DATABASE_URL", "DATABASE_URL"},
 		{"missing APP_URL", "APP_URL"},
 		{"missing RESEND_API_KEY", "RESEND_API_KEY"},
+		{"missing JWT_SECRET", "JWT_SECRET"},
 	}
 
 	for _, tc := range cases {
@@ -109,5 +111,8 @@ func TestLoad_AllVarsSet(t *testing.T) {
 	}
 	if cfg.ResendAPIKey != "re_test_key" {
 		t.Errorf("unexpected ResendAPIKey: %q", cfg.ResendAPIKey)
+	}
+	if cfg.JWTSecret != "test-jwt-secret-32-chars-minimum!!" {
+		t.Errorf("unexpected JWTSecret: %q", cfg.JWTSecret)
 	}
 }
