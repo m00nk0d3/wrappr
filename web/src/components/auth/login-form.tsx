@@ -23,9 +23,8 @@ export function LoginForm() {
     resolver: zodResolver(loginSchema),
   });
 
-  async function onSubmit(data: LoginFormData) {
+  async function onSubmit(_data: LoginFormData) {
     // TODO: wire up to auth API
-    console.log(data);
   }
 
   return (
