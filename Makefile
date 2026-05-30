@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate-up migrate-down migrate-version migrate-force
+.PHONY: up down logs migrate-up migrate-down migrate-version migrate-force sqlc
 
 up:
 	docker compose up -d
@@ -25,3 +25,7 @@ migrate-version:
 # Usage: make migrate-force VERSION=3
 migrate-force:
 	cd api && go run ./cmd/migrate -path file://../db/migrations force $(VERSION)
+
+# Regenerate type-safe DB code from SQL queries
+sqlc:
+	cd api && sqlc generate
