@@ -10,3 +10,4 @@ CREATE TABLE pipeline_events (
 
 CREATE INDEX idx_pipeline_events_job_id     ON pipeline_events(job_id);
 CREATE INDEX idx_pipeline_events_created_at ON pipeline_events(created_at DESC);
+CREATE INDEX idx_pipeline_events_to_status  ON pipeline_events(to_status);

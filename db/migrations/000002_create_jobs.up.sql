@@ -50,6 +50,11 @@ CREATE INDEX idx_jobs_pipeline_status  ON jobs(pipeline_status);
 CREATE INDEX idx_jobs_ai_job_category  ON jobs(ai_job_category);
 CREATE INDEX idx_jobs_client_email     ON jobs(company_id, client_email);
 
+-- Keep updated_at current on every row update (function defined in migration 001)
+CREATE TRIGGER trigger_set_updated_at
+    BEFORE UPDATE ON jobs
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- GIN index for fast tag-based filtering
 CREATE INDEX idx_jobs_ai_tags ON jobs USING GIN(ai_tags);
 

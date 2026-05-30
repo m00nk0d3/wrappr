@@ -58,6 +58,9 @@ func main() {
 		log.Println("migrations applied successfully")
 
 	case "down":
+		// Down rolls back ALL migrations to version 0 — every table is dropped.
+		// Use only in local dev or to fully reset a staging environment.
+		// In production, prefer deploying a new forward migration instead.
 		if err := m.Down(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 			log.Fatalf("migrate down failed: %v", err)
 		}

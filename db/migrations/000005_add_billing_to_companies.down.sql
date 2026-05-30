@@ -3,6 +3,7 @@ DROP INDEX IF EXISTS idx_companies_stripe_subscription_id;
 DROP INDEX IF EXISTS idx_companies_stripe_customer_id;
 
 ALTER TABLE companies
+    DROP CONSTRAINT IF EXISTS uq_companies_stripe_subscription_id,
     DROP CONSTRAINT IF EXISTS uq_companies_stripe_customer_id;
 
 ALTER TABLE companies

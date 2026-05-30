@@ -7,7 +7,9 @@ ALTER TABLE companies
     ADD COLUMN billing_email           TEXT;
 
 ALTER TABLE companies
-    ADD CONSTRAINT uq_companies_stripe_customer_id UNIQUE (stripe_customer_id);
+    ADD CONSTRAINT uq_companies_stripe_customer_id    UNIQUE (stripe_customer_id),
+    -- Partial unique: allows NULL (pre-subscription) while enforcing one row per Stripe subscription
+    ADD CONSTRAINT uq_companies_stripe_subscription_id UNIQUE (stripe_subscription_id);
 
 CREATE INDEX idx_companies_stripe_customer_id     ON companies(stripe_customer_id);
 CREATE INDEX idx_companies_stripe_subscription_id ON companies(stripe_subscription_id);

@@ -9,6 +9,8 @@ CREATE TABLE companies (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Authentication is handled by an external provider (e.g. Supabase Auth / Auth0).
+-- This table stores the app-level user profile; auth credentials live in the provider.
 CREATE TABLE users (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
