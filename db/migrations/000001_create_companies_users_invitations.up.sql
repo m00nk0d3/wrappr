@@ -14,7 +14,7 @@ CREATE TABLE users (
     company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     email        TEXT NOT NULL,
     name         TEXT NOT NULL,
-    role         TEXT NOT NULL DEFAULT 'technician', -- owner | admin | technician
+    role         TEXT NOT NULL DEFAULT 'technician' CHECK (role IN ('owner', 'admin', 'technician')),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (company_id, email)
@@ -27,7 +27,7 @@ CREATE TABLE invitations (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     email        TEXT NOT NULL,
-    role         TEXT NOT NULL DEFAULT 'technician',
+    role         TEXT NOT NULL DEFAULT 'technician' CHECK (role IN ('owner', 'admin', 'technician')),
     token        TEXT NOT NULL UNIQUE,
     accepted_at  TIMESTAMPTZ,
     expires_at   TIMESTAMPTZ NOT NULL,

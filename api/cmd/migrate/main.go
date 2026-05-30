@@ -3,7 +3,10 @@
 //
 // Usage:
 //
-//	DATABASE_URL=postgres://... ./migrate [-path file://path/to/migrations] [up|down|version|force N]
+//	DATABASE_URL=postgres://... ./migrate [-path file://../db/migrations] [up|down|version|force N]
+//
+// The -path flag defaults to file://../db/migrations, which resolves correctly
+// when running from the api/ directory (either via go run or a compiled binary).
 package main
 
 import (
@@ -20,7 +23,7 @@ import (
 )
 
 func main() {
-	migrationsPath := flag.String("path", "", "Path to migrations directory (e.g. file://db/migrations). Falls back to MIGRATIONS_PATH env var, then 'file://db/migrations'.")
+	migrationsPath := flag.String("path", "", "Path to migrations directory (e.g. file://../db/migrations). Falls back to MIGRATIONS_PATH env var, then 'file://../db/migrations'.")
 	flag.Parse()
 
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -32,7 +35,7 @@ func main() {
 		*migrationsPath = os.Getenv("MIGRATIONS_PATH")
 	}
 	if *migrationsPath == "" {
-		*migrationsPath = "file://db/migrations"
+		*migrationsPath = "file://../db/migrations"
 	}
 
 	m, err := migrate.New(*migrationsPath, databaseURL)

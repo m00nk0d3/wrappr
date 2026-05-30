@@ -12,7 +12,7 @@ CREATE TABLE job_recommendations (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id               UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
     description          TEXT NOT NULL,
-    urgency              TEXT NOT NULL, -- immediate | within_30_days | when_convenient
+    urgency              TEXT NOT NULL CHECK (urgency IN ('immediate', 'within_30_days', 'when_convenient')),
     estimated_cost_range TEXT,
     resolved             BOOLEAN NOT NULL DEFAULT FALSE,
     resolved_job_id      UUID REFERENCES jobs(id)

@@ -2,7 +2,7 @@ CREATE TABLE jobs (
     -- Core fields
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id            UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    technician_id         UUID NOT NULL REFERENCES users(id),
+    technician_id         UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     client_name           TEXT NOT NULL,
     client_email          TEXT,
     client_phone          TEXT,
@@ -13,12 +13,13 @@ CREATE TABLE jobs (
     technician_notes      TEXT,
     submitted_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at          TIMESTAMPTZ,
-    pipeline_status       TEXT NOT NULL DEFAULT 'queued',
+    pipeline_status       TEXT NOT NULL DEFAULT 'queued' CHECK (pipeline_status IN ('queued', 'processing', 'completed', 'failed', 'cancelled')),
     audio_url             TEXT,
     photo_urls            TEXT[],
     pdf_url               TEXT,
     email_sent_at         TIMESTAMPTZ,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- AI-extracted fields
     transcript            TEXT,
@@ -52,9 +53,11 @@ CREATE INDEX idx_jobs_client_email     ON jobs(company_id, client_email);
 -- GIN index for fast tag-based filtering
 CREATE INDEX idx_jobs_ai_tags ON jobs USING GIN(ai_tags);
 
--- Full-text search across client name, AI summary, and job address
+-- Full-text search across client name, AI summary, and job address.
+-- Uses 'simple' (no stemming/stop-words) so multilingual content is indexed consistently.
+-- Language-aware search can be added later via a generated tsvector column per language.
 CREATE INDEX idx_jobs_search ON jobs USING GIN(
-    to_tsvector('english',
+    to_tsvector('simple',
         coalesce(client_name, '') || ' ' ||
         coalesce(ai_summary, '')  || ' ' ||
         coalesce(job_address, '')
