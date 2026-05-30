@@ -6,8 +6,16 @@ RETURNING *;
 -- name: GetInvitationByToken :one
 SELECT * FROM invitations WHERE token = $1;
 
+-- name: GetValidInvitationByToken :one
+SELECT * FROM invitations
+WHERE token = $1
+  AND accepted_at IS NULL
+  AND expires_at > NOW();
+
 -- name: AcceptInvitation :one
 UPDATE invitations
 SET accepted_at = NOW()
 WHERE token = $1
+  AND accepted_at IS NULL
+  AND expires_at > NOW()
 RETURNING *;

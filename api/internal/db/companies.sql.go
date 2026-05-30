@@ -34,7 +34,7 @@ func (q *Queries) GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, 
 	return i, err
 }
 
-const updateCompanyTier = `-- name: UpdateCompanyTier :one
+const updateCompanySubscriptionStatus = `-- name: UpdateCompanySubscriptionStatus :one
 UPDATE companies
 SET subscription_status = $2,
     updated_at = NOW()
@@ -42,13 +42,13 @@ WHERE id = $1
 RETURNING id, name, slug, default_language, created_at, updated_at, stripe_customer_id, stripe_subscription_id, subscription_status, trial_ends_at, billing_email
 `
 
-type UpdateCompanyTierParams struct {
+type UpdateCompanySubscriptionStatusParams struct {
 	ID                 pgtype.UUID `json:"id"`
 	SubscriptionStatus string      `json:"subscription_status"`
 }
 
-func (q *Queries) UpdateCompanyTier(ctx context.Context, arg UpdateCompanyTierParams) (Company, error) {
-	row := q.db.QueryRow(ctx, updateCompanyTier, arg.ID, arg.SubscriptionStatus)
+func (q *Queries) UpdateCompanySubscriptionStatus(ctx context.Context, arg UpdateCompanySubscriptionStatusParams) (Company, error) {
+	row := q.db.QueryRow(ctx, updateCompanySubscriptionStatus, arg.ID, arg.SubscriptionStatus)
 	var i Company
 	err := row.Scan(
 		&i.ID,

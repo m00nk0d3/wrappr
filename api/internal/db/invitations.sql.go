@@ -15,6 +15,8 @@ const acceptInvitation = `-- name: AcceptInvitation :one
 UPDATE invitations
 SET accepted_at = NOW()
 WHERE token = $1
+  AND accepted_at IS NULL
+  AND expires_at > NOW()
 RETURNING id, company_id, email, role, token, accepted_at, expires_at, created_at
 `
 
@@ -76,6 +78,29 @@ SELECT id, company_id, email, role, token, accepted_at, expires_at, created_at F
 
 func (q *Queries) GetInvitationByToken(ctx context.Context, token string) (Invitation, error) {
 	row := q.db.QueryRow(ctx, getInvitationByToken, token)
+	var i Invitation
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.Email,
+		&i.Role,
+		&i.Token,
+		&i.AcceptedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getValidInvitationByToken = `-- name: GetValidInvitationByToken :one
+SELECT id, company_id, email, role, token, accepted_at, expires_at, created_at FROM invitations
+WHERE token = $1
+  AND accepted_at IS NULL
+  AND expires_at > NOW()
+`
+
+func (q *Queries) GetValidInvitationByToken(ctx context.Context, token string) (Invitation, error) {
+	row := q.db.QueryRow(ctx, getValidInvitationByToken, token)
 	var i Invitation
 	err := row.Scan(
 		&i.ID,

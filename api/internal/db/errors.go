@@ -6,8 +6,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ErrNotFound is returned when a queried row does not exist.
-// Handlers should check for this instead of importing pgx directly.
+// ErrNotFound is the canonical not-found sentinel for the DB layer.
+// Generated sqlc code returns pgx.ErrNoRows directly; repository wrappers
+// should map pgx.ErrNoRows → ErrNotFound so callers never need to import pgx.
+// Use IsNotFound() to check for either form.
 var ErrNotFound = errors.New("not found")
 
 // IsNotFound reports whether err is a not-found error from the DB layer.

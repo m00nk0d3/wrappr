@@ -1,7 +1,7 @@
 -- name: GetCompanyByID :one
 SELECT * FROM companies WHERE id = $1;
 
--- name: UpdateCompanyTier :one
+-- name: UpdateCompanySubscriptionStatus :one
 UPDATE companies
 SET subscription_status = $2,
     updated_at = NOW()
