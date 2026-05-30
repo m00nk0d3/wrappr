@@ -2,6 +2,7 @@ CREATE TABLE job_materials (
     id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id   UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
     name     TEXT NOT NULL,
+    -- TEXT intentionally: AI-extracted quantities are free-form (e.g. "a few", "~3 litres")
     quantity TEXT,
     unit     TEXT
 );
@@ -20,6 +21,7 @@ CREATE TABLE job_recommendations (
 
 CREATE INDEX idx_job_recommendations_job_id  ON job_recommendations(job_id);
 CREATE INDEX idx_job_recommendations_resolved ON job_recommendations(resolved) WHERE resolved = FALSE;
+CREATE INDEX idx_job_recommendations_resolved_job_id ON job_recommendations(resolved_job_id) WHERE resolved_job_id IS NOT NULL;
 
 -- Relational tags allow querying "all jobs with tag X" efficiently,
 -- complementing the ai_tags TEXT[] column used for GIN-based filtering.

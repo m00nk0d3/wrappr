@@ -36,3 +36,21 @@ CREATE TABLE invitations (
 
 CREATE INDEX idx_invitations_company_id ON invitations(company_id);
 CREATE INDEX idx_invitations_token ON invitations(token);
+
+-- Trigger function that keeps updated_at current on every row update.
+-- Attached to all tables that carry an updated_at column.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_set_updated_at
+    BEFORE UPDATE ON companies
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trigger_set_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
