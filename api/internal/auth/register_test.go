@@ -51,6 +51,31 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+// --- randomSuffix ---
+
+func TestRandomSuffix(t *testing.T) {
+	for _, n := range []int{4, 6, 8} {
+		s, err := randomSuffix(n)
+		if err != nil {
+			t.Fatalf("randomSuffix(%d) error: %v", n, err)
+		}
+		if len(s) != n {
+			t.Errorf("randomSuffix(%d) = %q, want len=%d", n, s, n)
+		}
+		matched, _ := regexp.MatchString(`^[0-9a-f]+$`, s)
+		if !matched {
+			t.Errorf("randomSuffix(%d) = %q is not lowercase hex", n, s)
+		}
+	}
+
+	// Two suffixes should be distinct with overwhelming probability.
+	a, _ := randomSuffix(4)
+	b, _ := randomSuffix(4)
+	if a == b {
+		t.Error("two consecutive randomSuffix(4) values are identical — RNG may be broken")
+	}
+}
+
 // --- generateToken ---
 
 func TestGenerateToken(t *testing.T) {

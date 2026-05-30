@@ -70,7 +70,7 @@ func (m *ResendMailer) SendMagicLink(ctx context.Context, to, name, magicLinkURL
 }
 
 // magicLinkHTML returns a minimal HTML email body containing a login button.
-// name is HTML-escaped to prevent injection from user-supplied content.
+// Both name and magicLinkURL are HTML-escaped to prevent injection.
 func magicLinkHTML(name, magicLinkURL string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -89,5 +89,5 @@ func magicLinkHTML(name, magicLinkURL string) string {
     If you did not request this email, you can safely ignore it.
   </p>
 </body>
-</html>`, html.EscapeString(name), magicLinkURL)
+</html>`, html.EscapeString(name), html.EscapeString(magicLinkURL))
 }
