@@ -16,7 +16,7 @@ CREATE TABLE job_recommendations (
     urgency              TEXT NOT NULL CHECK (urgency IN ('immediate', 'within_30_days', 'when_convenient')),
     estimated_cost_range TEXT,
     resolved             BOOLEAN NOT NULL DEFAULT FALSE,
-    resolved_job_id      UUID REFERENCES jobs(id)
+    resolved_job_id      UUID REFERENCES jobs(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_job_recommendations_job_id  ON job_recommendations(job_id);
