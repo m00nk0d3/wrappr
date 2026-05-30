@@ -12,6 +12,7 @@ const navItems = [
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
+// TODO: add mobile-responsive drawer/hamburger menu when dashboard layout supports it
 export function SidebarNav() {
   const pathname = usePathname();
   return (

@@ -9,7 +9,7 @@ export default function DashboardLayout({
     <div className="flex min-h-screen">
       <aside className="w-64 border-r bg-background">
         <div className="p-4 border-b">
-          <h1 className="text-xl font-bold">Wrappr</h1>
+          <span className="text-xl font-bold">Wrappr</span>
         </div>
         <SidebarNav />
       </aside>
