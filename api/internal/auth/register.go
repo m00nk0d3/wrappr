@@ -31,6 +31,8 @@ type registerRequest struct {
 
 // RegisterHandler returns a Gin handler for POST /v1/auth/register.
 //
+// TODO: add per-IP / per-email rate limiting before going to production.
+//
 //	201 {"message":"Registration successful. Check your email for a magic link."}
 //	400 {"error":"<validation message>"}
 //	500 {"error":"Internal server error"}
@@ -56,7 +58,7 @@ func RegisterHandler(pool *pgxpool.Pool, m mailer.Mailer, appURL string) gin.Han
 		if err == nil {
 			// Email already registered — silently issue a magic link to the
 			// existing account and return the same 201 so we don't leak info.
-			if sendErr := issueMagicLink(ctx, pool, m, appURL, existing.CompanyID, existing.Email, req.OwnerName, existing.Role); sendErr != nil {
+			if sendErr := issueMagicLink(ctx, pool, m, appURL, existing.CompanyID, existing.Email, existing.Name, existing.Role); sendErr != nil {
 				log.Printf("register: issue magic link for existing user: %v", sendErr)
 				// Still return success to avoid leaking account existence.
 			}
@@ -76,6 +78,8 @@ func RegisterHandler(pool *pgxpool.Pool, m mailer.Mailer, appURL string) gin.Han
 		qtx := db.New(tx)
 
 		// Create the company, retrying once on slug collision.
+		// Only one retry is attempted; a second collision would be
+		// astronomically unlikely and would surface as a 500.
 		slug := slugify(req.CompanyName)
 		company, err := qtx.CreateCompany(ctx, db.CreateCompanyParams{Name: req.CompanyName, Slug: slug})
 		if err != nil {

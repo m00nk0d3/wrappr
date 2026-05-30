@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 )
 
@@ -60,13 +62,15 @@ func (m *ResendMailer) SendMagicLink(ctx context.Context, to, name, magicLinkURL
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("mailer: unexpected status %d from Resend", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("mailer: unexpected status %d from Resend: %s", resp.StatusCode, body)
 	}
 
 	return nil
 }
 
 // magicLinkHTML returns a minimal HTML email body containing a login button.
+// name is HTML-escaped to prevent injection from user-supplied content.
 func magicLinkHTML(name, magicLinkURL string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -85,5 +89,5 @@ func magicLinkHTML(name, magicLinkURL string) string {
     If you did not request this email, you can safely ignore it.
   </p>
 </body>
-</html>`, name, magicLinkURL)
+</html>`, html.EscapeString(name), magicLinkURL)
 }
