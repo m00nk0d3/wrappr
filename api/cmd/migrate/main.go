@@ -3,11 +3,12 @@
 //
 // Usage:
 //
-//	DATABASE_URL=postgres://... ./migrate [up|down|version|force N]
+//	DATABASE_URL=postgres://... ./migrate [-path file://path/to/migrations] [up|down|version|force N]
 package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -19,25 +20,31 @@ import (
 )
 
 func main() {
+	migrationsPath := flag.String("path", "", "Path to migrations directory (e.g. file://db/migrations). Falls back to MIGRATIONS_PATH env var, then 'file://db/migrations'.")
+	flag.Parse()
+
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	migrationsPath := os.Getenv("MIGRATIONS_PATH")
-	if migrationsPath == "" {
-		migrationsPath = "file://db/migrations"
+	if *migrationsPath == "" {
+		*migrationsPath = os.Getenv("MIGRATIONS_PATH")
+	}
+	if *migrationsPath == "" {
+		*migrationsPath = "file://db/migrations"
 	}
 
-	m, err := migrate.New(migrationsPath, databaseURL)
+	m, err := migrate.New(*migrationsPath, databaseURL)
 	if err != nil {
 		log.Fatalf("failed to create migrator: %v", err)
 	}
 	defer m.Close()
 
+	args := flag.Args()
 	command := "up"
-	if len(os.Args) > 1 {
-		command = os.Args[1]
+	if len(args) > 0 {
+		command = args[0]
 	}
 
 	switch command {
@@ -61,12 +68,12 @@ func main() {
 		fmt.Printf("version=%d dirty=%v\n", version, dirty)
 
 	case "force":
-		if len(os.Args) < 3 {
+		if len(args) < 2 {
 			log.Fatal("force requires a version number: migrate force <N>")
 		}
-		version, err := strconv.Atoi(os.Args[2])
+		version, err := strconv.Atoi(args[1])
 		if err != nil {
-			log.Fatalf("invalid version %q: %v", os.Args[2], err)
+			log.Fatalf("invalid version %q: %v", args[1], err)
 		}
 		if err := m.Force(version); err != nil {
 			log.Fatalf("migrate force failed: %v", err)
