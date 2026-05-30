@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate-up migrate-down migrate-version migrate-force sqlc
+.PHONY: up down logs migrate-up migrate-down migrate-version migrate-force sqlc web-dev
 
 up:
 	docker compose up -d
@@ -29,3 +29,6 @@ migrate-force:
 # Regenerate type-safe DB code from SQL queries
 sqlc:
 	cd api && sqlc generate
+
+web-dev: ## Start Next.js dashboard dev server on :3001
+	cd web && npm run dev
