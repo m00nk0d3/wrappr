@@ -1,0 +1,58 @@
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE TABLE companies (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                TEXT NOT NULL,
+    slug                TEXT NOT NULL UNIQUE,
+    default_language    TEXT NOT NULL DEFAULT 'en',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Authentication is handled by an external provider (e.g. Supabase Auth / Auth0).
+-- This table stores the app-level user profile; auth credentials live in the provider.
+CREATE TABLE users (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    email        TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    role         TEXT NOT NULL DEFAULT 'technician' CHECK (role IN ('owner', 'admin', 'technician')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (company_id, email)
+);
+
+CREATE INDEX idx_users_company_id ON users(company_id);
+CREATE INDEX idx_users_email ON users(email);
+
+CREATE TABLE invitations (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    email        TEXT NOT NULL,
+    role         TEXT NOT NULL DEFAULT 'technician' CHECK (role IN ('owner', 'admin', 'technician')),
+    token        TEXT NOT NULL UNIQUE,
+    accepted_at  TIMESTAMPTZ,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_invitations_company_id ON invitations(company_id);
+CREATE INDEX idx_invitations_token ON invitations(token);
+
+-- Trigger function that keeps updated_at current on every row update.
+-- Attached to all tables that carry an updated_at column.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_set_updated_at
+    BEFORE UPDATE ON companies
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trigger_set_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
