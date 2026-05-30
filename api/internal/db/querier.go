@@ -28,7 +28,6 @@ type Querier interface {
 	GetJobByID(ctx context.Context, id pgtype.UUID) (Job, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
-	GetValidAuthTokenByHash(ctx context.Context, tokenHash string) (AuthToken, error)
 	GetValidInvitationByToken(ctx context.Context, token string) (Invitation, error)
 	ListJobMaterialsByJob(ctx context.Context, jobID pgtype.UUID) ([]JobMaterial, error)
 	ListJobRecommendationsByJob(ctx context.Context, jobID pgtype.UUID) ([]JobRecommendation, error)

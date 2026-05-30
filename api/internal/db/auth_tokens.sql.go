@@ -37,27 +37,6 @@ func (q *Queries) CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams
 	return i, err
 }
 
-const getValidAuthTokenByHash = `-- name: GetValidAuthTokenByHash :one
-SELECT id, user_id, token_hash, expires_at, used_at, created_at FROM auth_tokens
-WHERE token_hash = $1
-  AND used_at IS NULL
-  AND expires_at > NOW()
-`
-
-func (q *Queries) GetValidAuthTokenByHash(ctx context.Context, tokenHash string) (AuthToken, error) {
-	row := q.db.QueryRow(ctx, getValidAuthTokenByHash, tokenHash)
-	var i AuthToken
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.TokenHash,
-		&i.ExpiresAt,
-		&i.UsedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const useAuthToken = `-- name: UseAuthToken :one
 UPDATE auth_tokens
 SET used_at = NOW()

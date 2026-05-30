@@ -15,6 +15,8 @@ import (
 	"github.com/m00nk0d3/wrappr/api/internal/auth"
 	"github.com/m00nk0d3/wrappr/api/internal/config"
 	"github.com/m00nk0d3/wrappr/api/internal/mailer"
+	"github.com/m00nk0d3/wrappr/api/internal/middleware"
+	"golang.org/x/time/rate"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -81,9 +83,12 @@ func buildRouter() *gin.Engine {
 // external dependencies (DB pool, mailer). Called from main after deps are
 // initialised so buildRouter stays independently testable.
 func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string) {
+	// 5 magic-link requests per minute per IP (burst of 3).
+	magicLinkLimiter := middleware.NewIPRateLimiter(rate.Every(12*time.Second), 3)
+
 	v1 := router.Group("/v1")
 	v1.POST("/auth/register", auth.RegisterHandler(pool, m, appURL))
-	v1.POST("/auth/magic-link", auth.MagicLinkHandler(pool, m, appURL))
+	v1.POST("/auth/magic-link", magicLinkLimiter.Limit(), auth.MagicLinkHandler(pool, m, appURL))
 	v1.POST("/auth/verify", auth.VerifyHandler(pool, jwtSecret))
 }
 

@@ -95,6 +95,16 @@ func TestLoad_RequiredVars(t *testing.T) {
 	}
 }
 
+func TestLoad_ShortJWTSecret(t *testing.T) {
+	setRequiredEnvs(t)
+	t.Setenv("JWT_SECRET", "tooshort") // < 32 chars
+
+	_, err := Load()
+	if err == nil {
+		t.Error("expected error for JWT_SECRET shorter than 32 chars, got nil")
+	}
+}
+
 func TestLoad_AllVarsSet(t *testing.T) {
 	setRequiredEnvs(t)
 	t.Setenv("PORT", "4000")

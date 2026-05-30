@@ -58,6 +58,9 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	if len(jwtSecret) < 32 {
+		return nil, fmt.Errorf("config: JWT_SECRET must be at least 32 characters")
+	}
 
 	return &Config{
 		Port:         port,
