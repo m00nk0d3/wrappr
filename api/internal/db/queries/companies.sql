@@ -1,3 +1,8 @@
+-- name: CreateCompany :one
+INSERT INTO companies (name, slug)
+VALUES ($1, $2)
+RETURNING *;
+
 -- name: GetCompanyByID :one
 SELECT * FROM companies WHERE id = $1;
 

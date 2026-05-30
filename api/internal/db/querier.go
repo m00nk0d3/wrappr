@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	AcceptInvitation(ctx context.Context, token string) (Invitation, error)
+	CreateCompany(ctx context.Context, arg CreateCompanyParams) (Company, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreateJobMaterial(ctx context.Context, arg CreateJobMaterialParams) (JobMaterial, error)

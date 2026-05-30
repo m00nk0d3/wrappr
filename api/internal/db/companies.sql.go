@@ -11,6 +11,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createCompany = `-- name: CreateCompany :one
+INSERT INTO companies (name, slug)
+VALUES ($1, $2)
+RETURNING id, name, slug, default_language, created_at, updated_at, stripe_customer_id, stripe_subscription_id, subscription_status, trial_ends_at, billing_email
+`
+
+type CreateCompanyParams struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+func (q *Queries) CreateCompany(ctx context.Context, arg CreateCompanyParams) (Company, error) {
+	row := q.db.QueryRow(ctx, createCompany, arg.Name, arg.Slug)
+	var i Company
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.DefaultLanguage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.SubscriptionStatus,
+		&i.TrialEndsAt,
+		&i.BillingEmail,
+	)
+	return i, err
+}
+
 const getCompanyByID = `-- name: GetCompanyByID :one
 SELECT id, name, slug, default_language, created_at, updated_at, stripe_customer_id, stripe_subscription_id, subscription_status, trial_ends_at, billing_email FROM companies WHERE id = $1
 `
