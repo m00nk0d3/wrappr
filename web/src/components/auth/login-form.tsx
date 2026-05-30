@@ -36,7 +36,11 @@ export function LoginForm() {
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="space-y-1">
+            <label htmlFor="email" className="sr-only">
+              Email
+            </label>
             <Input
+              id="email"
               type="email"
               placeholder="Email"
               autoComplete="email"
@@ -48,7 +52,11 @@ export function LoginForm() {
             )}
           </div>
           <div className="space-y-1">
+            <label htmlFor="password" className="sr-only">
+              Password
+            </label>
             <Input
+              id="password"
               type="password"
               placeholder="Password"
               autoComplete="current-password"
