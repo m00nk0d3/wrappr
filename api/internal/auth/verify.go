@@ -50,7 +50,18 @@ func VerifyHandler(pool *pgxpool.Pool, jwtSecret string) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		tokenHash := sha256Hex(req.Token)
 
-		q := db.New(pool)
+		// Run UseAuthToken and GetUserByID inside a single transaction so that
+		// if GetUserByID fails, the token is not permanently consumed and the
+		// user can retry with the same magic link.
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			log.Printf("verify: begin tx: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			return
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck // intentional best-effort rollback
+
+		q := db.New(tx)
 
 		// UseAuthToken atomically validates and marks the token as used.
 		// Returns pgx.ErrNoRows if not found, expired, or already used.
@@ -63,6 +74,12 @@ func VerifyHandler(pool *pgxpool.Pool, jwtSecret string) gin.HandlerFunc {
 		user, err := q.GetUserByID(ctx, authToken.UserID)
 		if err != nil {
 			log.Printf("verify: get user by id: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			return
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			log.Printf("verify: commit tx: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			return
 		}

@@ -70,6 +70,11 @@ func main() {
 func buildRouter() *gin.Engine {
 	router := gin.New()
 
+	// Only trust RemoteAddr — never client-supplied X-Forwarded-For headers.
+	// Without this, ClientIP() would trust all proxies by default, allowing
+	// any client to spoof an arbitrary IP and bypass the rate limiter.
+	router.SetTrustedProxies(nil)
+
 	// Structured request logging and panic recovery.
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
