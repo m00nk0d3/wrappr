@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/m00nk0d3/wrappr/api/internal/auth"
 	"github.com/m00nk0d3/wrappr/api/internal/config"
+	"github.com/m00nk0d3/wrappr/api/internal/mailer"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -22,9 +25,20 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	m := mailer.NewResend(cfg.ResendAPIKey)
+
+	router := buildRouter()
+	registerAuthRoutes(router, pool, m, cfg.AppURL)
+
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
-		Handler: buildRouter(),
+		Handler: router,
 	}
 
 	// Start server in a background goroutine so main can block on the signal.
@@ -50,7 +64,7 @@ func main() {
 }
 
 // buildRouter constructs and returns the Gin engine with all routes registered.
-// Keeping it separate makes the router independently testable.
+// Keeping it separate (and zero-arg) makes the router independently testable.
 func buildRouter() *gin.Engine {
 	router := gin.New()
 
@@ -61,6 +75,14 @@ func buildRouter() *gin.Engine {
 	router.GET("/health", healthHandler)
 
 	return router
+}
+
+// registerAuthRoutes adds authenticated/infrastructure routes that require
+// external dependencies (DB pool, mailer). Called from main after deps are
+// initialised so buildRouter stays independently testable.
+func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL string) {
+	v1 := router.Group("/v1")
+	v1.POST("/auth/register", auth.RegisterHandler(pool, m, appURL))
 }
 
 // healthHandler responds with a simple liveness payload.

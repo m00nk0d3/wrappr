@@ -4,7 +4,17 @@ import (
 	"testing"
 )
 
+// setRequiredEnvs sets the three new required environment variables so that
+// tests focused on PORT behaviour are not blocked by missing vars.
+func setRequiredEnvs(t *testing.T) {
+	t.Helper()
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/test")
+	t.Setenv("APP_URL", "http://localhost:3001")
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+}
+
 func TestLoad_DefaultPort(t *testing.T) {
+	setRequiredEnvs(t)
 	t.Setenv("PORT", "")
 
 	cfg, err := Load()
@@ -20,6 +30,7 @@ func TestLoad_DefaultPort(t *testing.T) {
 }
 
 func TestLoad_CustomPort(t *testing.T) {
+	setRequiredEnvs(t)
 	t.Setenv("PORT", "9090")
 
 	cfg, err := Load()
@@ -48,6 +59,7 @@ func TestLoad_InvalidPort(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			setRequiredEnvs(t)
 			t.Setenv("PORT", tc.port)
 
 			_, err := Load()
@@ -55,5 +67,47 @@ func TestLoad_InvalidPort(t *testing.T) {
 				t.Errorf("expected error for PORT=%q, got nil", tc.port)
 			}
 		})
+	}
+}
+
+func TestLoad_RequiredVars(t *testing.T) {
+	cases := []struct {
+		name    string
+		unset   string
+	}{
+		{"missing DATABASE_URL", "DATABASE_URL"},
+		{"missing APP_URL", "APP_URL"},
+		{"missing RESEND_API_KEY", "RESEND_API_KEY"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setRequiredEnvs(t)
+			t.Setenv(tc.unset, "") // override to empty
+
+			_, err := Load()
+			if err == nil {
+				t.Errorf("expected error when %s is unset, got nil", tc.unset)
+			}
+		})
+	}
+}
+
+func TestLoad_AllVarsSet(t *testing.T) {
+	setRequiredEnvs(t)
+	t.Setenv("PORT", "4000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DatabaseURL != "postgres://user:pass@localhost:5432/test" {
+		t.Errorf("unexpected DatabaseURL: %q", cfg.DatabaseURL)
+	}
+	if cfg.AppURL != "http://localhost:3001" {
+		t.Errorf("unexpected AppURL: %q", cfg.AppURL)
+	}
+	if cfg.ResendAPIKey != "re_test_key" {
+		t.Errorf("unexpected ResendAPIKey: %q", cfg.ResendAPIKey)
 	}
 }
