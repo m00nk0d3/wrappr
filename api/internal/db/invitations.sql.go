@@ -92,6 +92,35 @@ func (q *Queries) GetInvitationByToken(ctx context.Context, token string) (Invit
 	return i, err
 }
 
+const getPendingInvitationByEmailAndCompany = `-- name: GetPendingInvitationByEmailAndCompany :one
+SELECT id, company_id, email, role, token, accepted_at, expires_at, created_at FROM invitations
+WHERE company_id = $1
+  AND email = $2
+  AND accepted_at IS NULL
+  AND expires_at > NOW()
+`
+
+type GetPendingInvitationByEmailAndCompanyParams struct {
+	CompanyID pgtype.UUID `json:"company_id"`
+	Email     string      `json:"email"`
+}
+
+func (q *Queries) GetPendingInvitationByEmailAndCompany(ctx context.Context, arg GetPendingInvitationByEmailAndCompanyParams) (Invitation, error) {
+	row := q.db.QueryRow(ctx, getPendingInvitationByEmailAndCompany, arg.CompanyID, arg.Email)
+	var i Invitation
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.Email,
+		&i.Role,
+		&i.Token,
+		&i.AcceptedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getValidInvitationByToken = `-- name: GetValidInvitationByToken :one
 SELECT id, company_id, email, role, token, accepted_at, expires_at, created_at FROM invitations
 WHERE token = $1

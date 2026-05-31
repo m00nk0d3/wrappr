@@ -102,12 +102,17 @@ func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer,
 		authGroup.POST("/register", auth.RegisterHandler(pool, m, appURL))
 		authGroup.POST("/magic-link", magicLinkLimiter.Limit(), auth.MagicLinkHandler(pool, m, appURL))
 		authGroup.POST("/verify", auth.VerifyHandler(pool, jwtSecret))
+		authGroup.POST("/accept-invite", auth.AcceptInviteHandler(pool, jwtSecret))
 	}
 
 	// Protected routes — JWT required on all /v1/* except /v1/auth/*.
-	// Future handlers should be registered on this group.
 	protected := v1.Group("", middleware.JWT(jwtSecret))
-	_ = protected
+
+	// Owner-only team management routes.
+	teamGroup := protected.Group("/team", middleware.RequireOwner())
+	{
+		teamGroup.POST("/invite", auth.InviteHandler(pool, m, appURL))
+	}
 }
 
 // healthHandler responds with a simple liveness payload.

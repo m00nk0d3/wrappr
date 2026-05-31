@@ -218,3 +218,21 @@ func randomSuffix(n int) (string, error) {
 	}
 	return hex.EncodeToString(b)[:n], nil
 }
+
+// parseUUID converts a UUID string into a pgtype.UUID.
+func parseUUID(s string) (pgtype.UUID, error) {
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("parse uuid %q: %w", s, err)
+	}
+	return u, nil
+}
+
+// isUniqueViolation reports whether err is a PostgreSQL unique constraint violation (23505).
+func isUniqueViolation(err error) bool {
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) {
+		return pgErr.SQLState() == "23505"
+	}
+	return false
+}
