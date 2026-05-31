@@ -106,7 +106,8 @@ func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer,
 
 	// Protected routes — JWT required on all /v1/* except /v1/auth/*.
 	// Future handlers should be registered on this group.
-	_ = v1.Group("", middleware.JWT(jwtSecret))
+	protected := v1.Group("", middleware.JWT(jwtSecret))
+	_ = protected
 }
 
 // healthHandler responds with a simple liveness payload.

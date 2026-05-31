@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -28,7 +29,7 @@ func JWT(secret string) gin.HandlerFunc {
 
 		tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}
 			return []byte(secret), nil
 		})
@@ -46,6 +47,11 @@ func JWT(secret string) gin.HandlerFunc {
 		userID, _ := claims["sub"].(string)
 		companyID, _ := claims["company_id"].(string)
 		role, _ := claims["role"].(string)
+
+		if userID == "" || companyID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token missing required claims"})
+			return
+		}
 
 		c.Set(contextKeyUserID, userID)
 		c.Set(contextKeyCompanyID, companyID)

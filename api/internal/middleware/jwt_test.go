@@ -141,6 +141,34 @@ func TestJWT_ValidToken_InjectsContext(t *testing.T) {
 	}
 }
 
+func TestJWT_MissingSub(t *testing.T) {
+	claims := jwt.MapClaims{
+		"company_id": "company-uuid-5678",
+		"role":       "technician",
+		"iat":        time.Now().Unix(),
+		"exp":        time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	token := makeToken(t, testSecret, claims)
+	w := doGet(newJWTRouter(testSecret), "/protected", "Bearer "+token)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestJWT_MissingCompanyID(t *testing.T) {
+	claims := jwt.MapClaims{
+		"sub":  "user-uuid-1234",
+		"role": "technician",
+		"iat":  time.Now().Unix(),
+		"exp":  time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	token := makeToken(t, testSecret, claims)
+	w := doGet(newJWTRouter(testSecret), "/protected", "Bearer "+token)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
 // --- RequireOwner tests ---
 
 func TestRequireOwner_TechnicianForbidden(t *testing.T) {
