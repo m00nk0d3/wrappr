@@ -86,8 +86,8 @@ func TestIntegration_NewRegistration(t *testing.T) {
 	}
 
 	// Magic link should have been sent.
-	if len(m.sentTo) != 1 || m.sentTo[0] != email {
-		t.Errorf("expected magic link sent to %q, got sentTo=%v", email, m.sentTo)
+	if s := m.sent(); len(s) != 1 || s[0] != email {
+		t.Errorf("expected magic link sent to %q, got sentTo=%v", email, s)
 	}
 
 	// User and company should exist in DB.
@@ -130,8 +130,8 @@ func TestIntegration_ExistingEmailSilentResend(t *testing.T) {
 	}
 
 	// Both calls should have triggered an email send.
-	if len(m.sentTo) != 2 {
-		t.Errorf("expected 2 magic links sent, got %d", len(m.sentTo))
+	if s := m.sent(); len(s) != 2 {
+		t.Errorf("expected 2 magic links sent, got %d", len(s))
 	}
 }
 

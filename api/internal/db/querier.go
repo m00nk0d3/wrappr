@@ -12,6 +12,7 @@ import (
 
 type Querier interface {
 	AcceptInvitation(ctx context.Context, token string) (Invitation, error)
+	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateCompany(ctx context.Context, arg CreateCompanyParams) (Company, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
@@ -39,6 +40,7 @@ type Querier interface {
 	UpdateCompanySubscriptionStatus(ctx context.Context, arg UpdateCompanySubscriptionStatusParams) (Company, error)
 	UpdateJobPipeline(ctx context.Context, arg UpdateJobPipelineParams) (Job, error)
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (Job, error)
+	UseAuthToken(ctx context.Context, tokenHash string) (AuthToken, error)
 }
 
 var _ Querier = (*Queries)(nil)

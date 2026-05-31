@@ -15,6 +15,8 @@ import (
 	"github.com/m00nk0d3/wrappr/api/internal/auth"
 	"github.com/m00nk0d3/wrappr/api/internal/config"
 	"github.com/m00nk0d3/wrappr/api/internal/mailer"
+	"github.com/m00nk0d3/wrappr/api/internal/middleware"
+	"golang.org/x/time/rate"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -33,8 +35,13 @@ func main() {
 
 	m := mailer.NewResend(cfg.ResendAPIKey)
 
+	// Context cancelled on SIGINT/SIGTERM — shared with background goroutines
+	// (e.g. the rate-limiter cleanup loop) so they exit cleanly on shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	router := buildRouter()
-	registerAuthRoutes(router, pool, m, cfg.AppURL)
+	registerAuthRoutes(router, pool, m, cfg.AppURL, cfg.JWTSecret, ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
@@ -50,8 +57,6 @@ func main() {
 	}()
 
 	// Block until SIGINT or SIGTERM is received.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	<-ctx.Done()
 
 	// Give in-flight requests up to shutdownTimeout to complete.
@@ -68,6 +73,11 @@ func main() {
 func buildRouter() *gin.Engine {
 	router := gin.New()
 
+	// Only trust RemoteAddr — never client-supplied X-Forwarded-For headers.
+	// Without this, ClientIP() would trust all proxies by default, allowing
+	// any client to spoof an arbitrary IP and bypass the rate limiter.
+	router.SetTrustedProxies(nil)
+
 	// Structured request logging and panic recovery.
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
@@ -80,9 +90,14 @@ func buildRouter() *gin.Engine {
 // registerAuthRoutes adds authenticated/infrastructure routes that require
 // external dependencies (DB pool, mailer). Called from main after deps are
 // initialised so buildRouter stays independently testable.
-func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL string) {
+func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string, ctx context.Context) {
+	// 5 magic-link requests per minute per IP (burst of 3).
+	magicLinkLimiter := middleware.NewIPRateLimiter(ctx, rate.Every(12*time.Second), 3)
+
 	v1 := router.Group("/v1")
 	v1.POST("/auth/register", auth.RegisterHandler(pool, m, appURL))
+	v1.POST("/auth/magic-link", magicLinkLimiter.Limit(), auth.MagicLinkHandler(pool, m, appURL))
+	v1.POST("/auth/verify", auth.VerifyHandler(pool, jwtSecret))
 }
 
 // healthHandler responds with a simple liveness payload.

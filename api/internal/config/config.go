@@ -25,6 +25,9 @@ type Config struct {
 
 	// ResendAPIKey is the API key for the Resend email service (required).
 	ResendAPIKey string
+
+	// JWTSecret is the HMAC-SHA256 signing secret for issued JWTs (required).
+	JWTSecret string
 }
 
 // Load reads configuration from environment variables and returns a validated
@@ -51,11 +54,20 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
+	jwtSecret, err := requireEnv("JWT_SECRET")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	if len(jwtSecret) < 32 {
+		return nil, fmt.Errorf("config: JWT_SECRET must be at least 32 characters")
+	}
+
 	return &Config{
 		Port:         port,
 		DatabaseURL:  databaseURL,
 		AppURL:       appURL,
 		ResendAPIKey: resendAPIKey,
+		JWTSecret:    jwtSecret,
 	}, nil
 }
 
