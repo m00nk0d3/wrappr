@@ -218,3 +218,4 @@ func randomSuffix(n int) (string, error) {
 	}
 	return hex.EncodeToString(b)[:n], nil
 }
+

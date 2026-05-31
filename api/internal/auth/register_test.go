@@ -34,6 +34,13 @@ func (m *mockMailer) SendMagicLink(_ context.Context, to, _, _ string) error {
 	return m.sendErr
 }
 
+func (m *mockMailer) SendInvitation(_ context.Context, to, _ string) error {
+	m.mu.Lock()
+	m.sentTo = append(m.sentTo, to)
+	m.mu.Unlock()
+	return m.sendErr
+}
+
 // sent returns a snapshot of all addresses the mock has sent to.
 func (m *mockMailer) sent() []string {
 	m.mu.Lock()

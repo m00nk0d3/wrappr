@@ -26,6 +26,7 @@ type Querier interface {
 	GetCompanyByID(ctx context.Context, id pgtype.UUID) (Company, error)
 	GetInvitationByToken(ctx context.Context, token string) (Invitation, error)
 	GetJobByID(ctx context.Context, id pgtype.UUID) (Job, error)
+	GetPendingInvitationByEmailAndCompany(ctx context.Context, arg GetPendingInvitationByEmailAndCompanyParams) (Invitation, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetValidInvitationByToken(ctx context.Context, token string) (Invitation, error)
