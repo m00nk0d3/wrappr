@@ -95,9 +95,18 @@ func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer,
 	magicLinkLimiter := middleware.NewIPRateLimiter(ctx, rate.Every(12*time.Second), 3)
 
 	v1 := router.Group("/v1")
-	v1.POST("/auth/register", auth.RegisterHandler(pool, m, appURL))
-	v1.POST("/auth/magic-link", magicLinkLimiter.Limit(), auth.MagicLinkHandler(pool, m, appURL))
-	v1.POST("/auth/verify", auth.VerifyHandler(pool, jwtSecret))
+
+	// Public auth routes — no JWT required.
+	authGroup := v1.Group("/auth")
+	{
+		authGroup.POST("/register", auth.RegisterHandler(pool, m, appURL))
+		authGroup.POST("/magic-link", magicLinkLimiter.Limit(), auth.MagicLinkHandler(pool, m, appURL))
+		authGroup.POST("/verify", auth.VerifyHandler(pool, jwtSecret))
+	}
+
+	// Protected routes — JWT required on all /v1/* except /v1/auth/*.
+	// Future handlers should be registered on this group.
+	_ = v1.Group("", middleware.JWT(jwtSecret))
 }
 
 // healthHandler responds with a simple liveness payload.
