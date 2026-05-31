@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -33,30 +34,36 @@ type IPRateLimiter struct {
 // NewIPRateLimiter creates an IPRateLimiter where each IP is allowed r events
 // per second with a burst of b. A background goroutine periodically evicts
 // entries that have been idle longer than idleTimeout to prevent unbounded
-// memory growth.
-func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
+// memory growth. The goroutine stops when ctx is cancelled, making this safe
+// to use in tests without goroutine leaks.
+func NewIPRateLimiter(ctx context.Context, r rate.Limit, b int) *IPRateLimiter {
 	l := &IPRateLimiter{
 		limiters: make(map[string]*entry),
 		r:        r,
 		b:        b,
 	}
-	go l.cleanupLoop()
+	go l.cleanupLoop(ctx)
 	return l
 }
 
 // cleanupLoop runs every cleanupInterval and evicts limiters that have not
-// been accessed within idleTimeout.
-func (l *IPRateLimiter) cleanupLoop() {
+// been accessed within idleTimeout. It exits when ctx is cancelled.
+func (l *IPRateLimiter) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		l.mu.Lock()
-		for ip, e := range l.limiters {
-			if time.Since(e.lastSeen) > idleTimeout {
-				delete(l.limiters, ip)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.mu.Lock()
+			for ip, e := range l.limiters {
+				if time.Since(e.lastSeen) > idleTimeout {
+					delete(l.limiters, ip)
+				}
 			}
+			l.mu.Unlock()
 		}
-		l.mu.Unlock()
 	}
 }
 

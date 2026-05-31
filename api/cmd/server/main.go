@@ -35,8 +35,13 @@ func main() {
 
 	m := mailer.NewResend(cfg.ResendAPIKey)
 
+	// Context cancelled on SIGINT/SIGTERM — shared with background goroutines
+	// (e.g. the rate-limiter cleanup loop) so they exit cleanly on shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	router := buildRouter()
-	registerAuthRoutes(router, pool, m, cfg.AppURL, cfg.JWTSecret)
+	registerAuthRoutes(router, pool, m, cfg.AppURL, cfg.JWTSecret, ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
@@ -52,8 +57,6 @@ func main() {
 	}()
 
 	// Block until SIGINT or SIGTERM is received.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	<-ctx.Done()
 
 	// Give in-flight requests up to shutdownTimeout to complete.
@@ -87,9 +90,9 @@ func buildRouter() *gin.Engine {
 // registerAuthRoutes adds authenticated/infrastructure routes that require
 // external dependencies (DB pool, mailer). Called from main after deps are
 // initialised so buildRouter stays independently testable.
-func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string) {
+func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string, ctx context.Context) {
 	// 5 magic-link requests per minute per IP (burst of 3).
-	magicLinkLimiter := middleware.NewIPRateLimiter(rate.Every(12*time.Second), 3)
+	magicLinkLimiter := middleware.NewIPRateLimiter(ctx, rate.Every(12*time.Second), 3)
 
 	v1 := router.Group("/v1")
 	v1.POST("/auth/register", auth.RegisterHandler(pool, m, appURL))

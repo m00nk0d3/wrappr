@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/m00nk0d3/wrappr/api/internal/db"
 )
@@ -67,7 +69,12 @@ func VerifyHandler(pool *pgxpool.Pool, jwtSecret string) gin.HandlerFunc {
 		// Returns pgx.ErrNoRows if not found, expired, or already used.
 		authToken, err := q.UseAuthToken(ctx, tokenHash)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			} else {
+				log.Printf("verify: use auth token: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			}
 			return
 		}
 

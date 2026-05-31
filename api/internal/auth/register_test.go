@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -18,14 +19,28 @@ func init() {
 }
 
 // mockMailer implements mailer.Mailer for tests.
+// It is goroutine-safe so it can be called from background goroutines
+// (e.g. MagicLinkHandler's async token-send path).
 type mockMailer struct {
-	sentTo   []string
-	sendErr  error
+	mu      sync.Mutex
+	sentTo  []string
+	sendErr error
 }
 
 func (m *mockMailer) SendMagicLink(_ context.Context, to, _, _ string) error {
+	m.mu.Lock()
 	m.sentTo = append(m.sentTo, to)
+	m.mu.Unlock()
 	return m.sendErr
+}
+
+// sent returns a snapshot of all addresses the mock has sent to.
+func (m *mockMailer) sent() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.sentTo))
+	copy(out, m.sentTo)
+	return out
 }
 
 // --- slugify ---
