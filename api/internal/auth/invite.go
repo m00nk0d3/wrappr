@@ -94,6 +94,11 @@ func InviteHandler(pool *pgxpool.Pool, m mailer.Mailer, appURL string) gin.Handl
 		// client is not blocked by email delivery latency.
 		bgCtx := context.WithoutCancel(ctx)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("invite: panic in email goroutine: %v", r)
+				}
+			}()
 			inviteURL := fmt.Sprintf("%s/auth/accept-invite?token=%s", strings.TrimRight(appURL, "/"), token)
 			if err := m.SendInvitation(bgCtx, req.Email, inviteURL); err != nil {
 				log.Printf("invite: send invitation email: %v", err)

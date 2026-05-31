@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,29 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/m00nk0d3/wrappr/api/internal/db"
 )
+
+// mockAcceptInviteExecutor stubs AcceptInvite for unit tests.
+type mockAcceptInviteExecutor struct {
+	user db.User
+	err  error
+}
+
+func (m *mockAcceptInviteExecutor) AcceptInvite(_ context.Context, _, _ string) (db.User, error) {
+	return m.user, m.err
+}
 
 func newAcceptInviteRouter(jwtSecret string) *gin.Engine {
 	r := gin.New()
-	// nil pool — safe for validation-failure paths that never hit the DB.
+	// nil pool — safe for validation-failure paths that never reach the executor.
 	r.POST("/v1/auth/accept-invite", AcceptInviteHandler(nil, jwtSecret))
+	return r
+}
+
+func newAcceptInviteRouterWithExec(exec acceptInviteExecutor, jwtSecret string) *gin.Engine {
+	r := gin.New()
+	r.POST("/v1/auth/accept-invite", acceptInviteHandlerWithExecutor(exec, jwtSecret))
 	return r
 }
 
@@ -89,3 +107,64 @@ func TestAcceptInviteHandler_NonJSONBody(t *testing.T) {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
 }
+
+func TestAcceptInviteHandler_InvalidToken(t *testing.T) {
+	exec := &mockAcceptInviteExecutor{err: db.ErrNotFound}
+	router := newAcceptInviteRouterWithExec(exec, "test-secret")
+
+	w := doAcceptInvite(t, router, map[string]string{"token": "bad-token", "name": "John"})
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401; body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["error"] == "" {
+		t.Errorf("expected non-empty 'error' field in response")
+	}
+}
+
+func TestAcceptInviteHandler_DuplicateUser(t *testing.T) {
+	exec := &mockAcceptInviteExecutor{err: db.ErrConflict}
+	router := newAcceptInviteRouterWithExec(exec, "test-secret")
+
+	w := doAcceptInvite(t, router, map[string]string{"token": "valid-token", "name": "John"})
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409; body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["error"] == "" {
+		t.Errorf("expected non-empty 'error' field in response")
+	}
+}
+
+func TestAcceptInviteHandler_Success(t *testing.T) {
+	const jwtSecret = "test-secret"
+	user := fakeUser()
+	exec := &mockAcceptInviteExecutor{user: user}
+	router := newAcceptInviteRouterWithExec(exec, jwtSecret)
+
+	w := doAcceptInvite(t, router, map[string]string{"token": "valid-token", "name": user.Name})
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp verifyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Token == "" {
+		t.Error("expected non-empty JWT token in response")
+	}
+	if resp.User.Email != user.Email {
+		t.Errorf("user.Email = %q, want %q", resp.User.Email, user.Email)
+	}
+	if resp.User.Role != user.Role {
+		t.Errorf("user.Role = %q, want %q", resp.User.Role, user.Role)
+	}
+}
+

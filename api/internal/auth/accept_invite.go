@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -17,6 +19,58 @@ type acceptInviteRequest struct {
 	Name  string `json:"name"  binding:"required"`
 }
 
+// acceptInviteExecutor handles the transactional DB work for invitation acceptance.
+// It is a seam for unit testing — production code uses poolAcceptInviteExecutor.
+type acceptInviteExecutor interface {
+	AcceptInvite(ctx context.Context, token, name string) (db.User, error)
+}
+
+// poolAcceptInviteExecutor is the production executor backed by a pgxpool.
+// It runs AcceptInvitation + CreateUser in a single transaction and translates
+// known DB sentinel errors to db.ErrNotFound / db.ErrConflict.
+type poolAcceptInviteExecutor struct {
+	pool *pgxpool.Pool
+}
+
+func (e *poolAcceptInviteExecutor) AcceptInvite(ctx context.Context, token, name string) (db.User, error) {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return db.User{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := db.New(tx)
+
+	// AcceptInvitation atomically marks the invitation as accepted.
+	// Returns pgx.ErrNoRows if the token is not found, already accepted, or expired.
+	invitation, err := q.AcceptInvitation(ctx, token)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.User{}, db.ErrNotFound
+		}
+		return db.User{}, fmt.Errorf("accept invitation: %w", err)
+	}
+
+	user, err := q.CreateUser(ctx, db.CreateUserParams{
+		CompanyID: invitation.CompanyID,
+		Email:     invitation.Email,
+		Name:      name,
+		Role:      invitation.Role,
+	})
+	if err != nil {
+		if db.IsDuplicateKey(err) {
+			return db.User{}, db.ErrConflict
+		}
+		return db.User{}, fmt.Errorf("create user: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.User{}, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return user, nil
+}
+
 // AcceptInviteHandler returns a Gin handler for POST /v1/auth/accept-invite.
 // This is a public endpoint — no JWT required.
 //
@@ -26,6 +80,11 @@ type acceptInviteRequest struct {
 //	409 {"error":"An account with this email already exists in this company"}
 //	500 {"error":"Internal server error"}
 func AcceptInviteHandler(pool *pgxpool.Pool, jwtSecret string) gin.HandlerFunc {
+	return acceptInviteHandlerWithExecutor(&poolAcceptInviteExecutor{pool: pool}, jwtSecret)
+}
+
+// acceptInviteHandlerWithExecutor is the testable core of AcceptInviteHandler.
+func acceptInviteHandlerWithExecutor(exec acceptInviteExecutor, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req acceptInviteRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -35,51 +94,24 @@ func AcceptInviteHandler(pool *pgxpool.Pool, jwtSecret string) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 
-		tx, err := pool.Begin(ctx)
+		user, err := exec.AcceptInvite(ctx, req.Token, req.Name)
 		if err != nil {
-			log.Printf("accept-invite: begin tx: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-			return
-		}
-		defer tx.Rollback(ctx) //nolint:errcheck
-
-		q := db.New(tx)
-
-		// AcceptInvitation atomically marks the invitation as accepted.
-		// Returns pgx.ErrNoRows if the token is not found, already accepted, or expired.
-		invitation, err := q.AcceptInvitation(ctx, req.Token)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			switch {
+			case errors.Is(err, db.ErrNotFound):
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired invitation"})
-			} else {
-				log.Printf("accept-invite: accept invitation: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-			}
-			return
-		}
-
-		user, err := q.CreateUser(ctx, db.CreateUserParams{
-			CompanyID: invitation.CompanyID,
-			Email:     invitation.Email,
-			Name:      req.Name,
-			Role:      invitation.Role,
-		})
-		if err != nil {
-			if isUniqueViolation(err) {
+			case errors.Is(err, db.ErrConflict):
 				c.JSON(http.StatusConflict, gin.H{"error": "An account with this email already exists in this company"})
-			} else {
-				log.Printf("accept-invite: create user: %v", err)
+			default:
+				log.Printf("accept-invite: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			}
 			return
 		}
 
-		if err := tx.Commit(ctx); err != nil {
-			log.Printf("accept-invite: commit tx: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-			return
-		}
-
+		// At this point the user is committed to the database. If JWT issuance
+		// fails here, the user exists but has no way to authenticate via the
+		// invite flow. This is an acceptable edge case — the owner can re-invite
+		// or the user can log in once a password-reset / magic-link flow is added.
 		jwtToken, err := issueJWT(user, jwtSecret)
 		if err != nil {
 			log.Printf("accept-invite: issue jwt: %v", err)
