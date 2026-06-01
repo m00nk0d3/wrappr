@@ -22,6 +22,14 @@ SET pipeline_status = $2, updated_at = NOW()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateJobTranscript :one
+UPDATE jobs
+SET pipeline_status = $2,
+    transcript = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateJobPipeline :one
 UPDATE jobs
 SET pipeline_status = $2,

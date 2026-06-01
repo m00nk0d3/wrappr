@@ -28,6 +28,25 @@ type Config struct {
 
 	// JWTSecret is the HMAC-SHA256 signing secret for issued JWTs (required).
 	JWTSecret string
+
+	// RedisURL is the Redis connection string used by Asynq (required).
+	// e.g. "redis://localhost:6379"
+	RedisURL string
+
+	// R2AccountID is the Cloudflare account ID for the R2 storage bucket.
+	R2AccountID string
+
+	// R2AccessKeyID is the R2 API access key ID.
+	R2AccessKeyID string
+
+	// R2SecretAccessKey is the R2 API secret access key.
+	R2SecretAccessKey string
+
+	// R2Bucket is the name of the R2 bucket used to store job files.
+	R2Bucket string
+
+	// GroqAPIKey is the API key for the Groq Whisper transcription API.
+	GroqAPIKey string
 }
 
 // Load reads configuration from environment variables and returns a validated
@@ -62,12 +81,48 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: JWT_SECRET must be at least 32 characters")
 	}
 
+	redisURL, err := requireEnv("REDIS_URL")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
+	r2AccountID, err := requireEnv("R2_ACCOUNT_ID")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
+	r2AccessKeyID, err := requireEnv("R2_ACCESS_KEY_ID")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
+	r2SecretAccessKey, err := requireEnv("R2_SECRET_ACCESS_KEY")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
+	r2Bucket, err := requireEnv("R2_BUCKET")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
+	groqAPIKey, err := requireEnv("GROQ_API_KEY")
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
 	return &Config{
-		Port:         port,
-		DatabaseURL:  databaseURL,
-		AppURL:       appURL,
-		ResendAPIKey: resendAPIKey,
-		JWTSecret:    jwtSecret,
+		Port:              port,
+		DatabaseURL:       databaseURL,
+		AppURL:            appURL,
+		ResendAPIKey:      resendAPIKey,
+		JWTSecret:         jwtSecret,
+		RedisURL:          redisURL,
+		R2AccountID:       r2AccountID,
+		R2AccessKeyID:     r2AccessKeyID,
+		R2SecretAccessKey: r2SecretAccessKey,
+		R2Bucket:          r2Bucket,
+		GroqAPIKey:        groqAPIKey,
 	}, nil
 }
 
