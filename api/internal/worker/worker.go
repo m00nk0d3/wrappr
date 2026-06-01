@@ -160,8 +160,13 @@ func ParseRedisURL(rawURL string) (asynq.RedisClientOpt, error) {
 		opt.DB = n
 	}
 
-	if u.Scheme == "rediss" {
-		opt.TLSConfig = &tls.Config{}
+	switch u.Scheme {
+	case "redis":
+		// plain TCP — no TLS
+	case "rediss":
+		opt.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	default:
+		return asynq.RedisClientOpt{}, fmt.Errorf("redis URL %q has unsupported scheme %q (want redis:// or rediss://)", rawURL, u.Scheme)
 	}
 
 	return opt, nil

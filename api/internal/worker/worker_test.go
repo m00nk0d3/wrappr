@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"crypto/tls"
 	"testing"
 	"time"
 
@@ -40,6 +41,16 @@ func TestParseRedisURL(t *testing.T) {
 			wantAddr: "redis.example.com:6380",
 			wantPw:   "mypassword",
 			wantTLS:  true,
+		},
+		{
+			name:      "unsupported scheme (http)",
+			url:       "http://localhost:6379",
+			wantError: true,
+		},
+		{
+			name:      "unsupported scheme (tcp)",
+			url:       "tcp://localhost:6379",
+			wantError: true,
 		},
 		{
 			name:      "missing host",
@@ -99,6 +110,9 @@ func TestParseRedisURL(t *testing.T) {
 			hasTLS := opt.TLSConfig != nil
 			if hasTLS != tc.wantTLS {
 				t.Errorf("TLSConfig presence: want %v, got %v", tc.wantTLS, hasTLS)
+			}
+			if tc.wantTLS && opt.TLSConfig.MinVersion != tls.VersionTLS12 {
+				t.Errorf("TLSConfig.MinVersion: want TLS 1.2 (%d), got %d", tls.VersionTLS12, opt.TLSConfig.MinVersion)
 			}
 		})
 	}

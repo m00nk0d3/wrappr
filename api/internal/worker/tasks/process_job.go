@@ -62,7 +62,7 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 	var payload pipeline.ProcessJobPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		// Malformed payload — no point retrying.
-		return fmt.Errorf("process_job: unmarshal payload: %w", asynq.SkipRetry)
+		return fmt.Errorf("process_job: unmarshal payload (%v): %w", err, asynq.SkipRetry)
 	}
 	if payload.JobID == "" {
 		return fmt.Errorf("process_job: empty job_id: %w", asynq.SkipRetry)
@@ -70,7 +70,7 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 
 	var jobUUID pgtype.UUID
 	if err := jobUUID.Scan(payload.JobID); err != nil {
-		return fmt.Errorf("process_job: parse job UUID %q: %w", payload.JobID, asynq.SkipRetry)
+		return fmt.Errorf("process_job: parse job UUID %q (%v): %w", payload.JobID, err, asynq.SkipRetry)
 	}
 
 	q := db.New(h.pool)
