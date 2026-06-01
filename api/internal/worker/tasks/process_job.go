@@ -3,7 +3,6 @@
 package tasks
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,25 +26,30 @@ const (
 
 	// unclearTranscript is stored when Groq returns an empty transcript.
 	unclearTranscript = "Voice memo was unclear — technician notes unavailable."
-)
 
-// groqHTTPClient is used for all Groq API calls. The 90-second timeout covers
-// worst-case transcription latency for large audio files without letting a
-// stalled request hang the worker goroutine indefinitely.
-var groqHTTPClient = &http.Client{Timeout: 90 * time.Second}
+	// defaultGroqTimeout covers worst-case transcription latency for large audio
+	// files without letting a stalled request hang the worker goroutine indefinitely.
+	defaultGroqTimeout = 90 * time.Second
+)
 
 // ProcessJobHandler implements asynq.Handler for the "pipeline:process_job" task.
 // It downloads the job's audio from R2, sends it to Groq Whisper, and stores the
 // resulting transcript in the database.
 type ProcessJobHandler struct {
-	pool    *pgxpool.Pool
-	r2      *r2.Client
-	groqKey string
+	pool       *pgxpool.Pool
+	r2         *r2.Client
+	groqKey    string
+	httpClient *http.Client
 }
 
-// NewProcessJobHandler constructs a ProcessJobHandler.
+// NewProcessJobHandler constructs a ProcessJobHandler with a default HTTP client.
 func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey string) *ProcessJobHandler {
-	return &ProcessJobHandler{pool: pool, r2: r2Client, groqKey: groqKey}
+	return &ProcessJobHandler{
+		pool:       pool,
+		r2:         r2Client,
+		groqKey:    groqKey,
+		httpClient: &http.Client{Timeout: defaultGroqTimeout},
+	}
 }
 
 // ProcessTask handles a single "pipeline:process_job" task.
@@ -85,21 +89,17 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 		return fmt.Errorf("process_job: update status to transcribing: %w", err)
 	}
 
-	// 3. Download audio bytes from R2.
+	// 3. Download audio from R2 and stream directly to Groq — avoids buffering
+	// the entire file in memory (up to 32 MB per job).
 	audioReader, err := h.r2.Download(ctx, job.AudioUrl.String)
 	if err != nil {
 		return fmt.Errorf("process_job: download audio for job %s: %w", payload.JobID, err)
 	}
 	defer audioReader.Close()
 
-	audioBytes, err := io.ReadAll(audioReader)
-	if err != nil {
-		return fmt.Errorf("process_job: read audio bytes for job %s: %w", payload.JobID, err)
-	}
-
 	// 4. Transcribe via Groq Whisper.
 	audioFilename := audioFilenameFromKey(job.AudioUrl.String)
-	transcript, err := h.transcribeAudio(ctx, audioBytes, audioFilename)
+	transcript, err := h.transcribeAudio(ctx, audioReader, audioFilename)
 	if err != nil {
 		return fmt.Errorf("process_job: transcribe job %s: %w", payload.JobID, err)
 	}
@@ -121,34 +121,44 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 	return nil
 }
 
-// transcribeAudio calls the Groq Whisper API and returns the transcript text.
-func (h *ProcessJobHandler) transcribeAudio(ctx context.Context, audioBytes []byte, filename string) (string, error) {
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
+// transcribeAudio streams audioReader to the Groq Whisper API and returns the
+// transcript text. It uses io.Pipe so the audio is forwarded to Groq without
+// being fully buffered in memory.
+func (h *ProcessJobHandler) transcribeAudio(ctx context.Context, audioReader io.Reader, filename string) (string, error) {
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
 
-	part, err := w.CreateFormFile("file", filename)
-	if err != nil {
-		return "", fmt.Errorf("create form file: %w", err)
-	}
-	if _, err := part.Write(audioBytes); err != nil {
-		return "", fmt.Errorf("write audio bytes: %w", err)
-	}
-	if err := w.WriteField("model", groqModel); err != nil {
-		return "", fmt.Errorf("write model field: %w", err)
-	}
-	if err := w.WriteField("response_format", "text"); err != nil {
-		return "", fmt.Errorf("write response_format field: %w", err)
-	}
-	w.Close()
+	// Stream the multipart body to Groq in a goroutine so the HTTP request
+	// begins reading before the entire audio has been written.
+	go func() {
+		err := func() error {
+			part, err := mw.CreateFormFile("file", filename)
+			if err != nil {
+				return fmt.Errorf("create form file: %w", err)
+			}
+			if _, err := io.Copy(part, audioReader); err != nil {
+				return fmt.Errorf("copy audio: %w", err)
+			}
+			if err := mw.WriteField("model", groqModel); err != nil {
+				return fmt.Errorf("write model field: %w", err)
+			}
+			if err := mw.WriteField("response_format", "text"); err != nil {
+				return fmt.Errorf("write response_format field: %w", err)
+			}
+			return mw.Close()
+		}()
+		pw.CloseWithError(err)
+	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, groqTranscriptionURL, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, groqTranscriptionURL, pr)
 	if err != nil {
+		pr.CloseWithError(err)
 		return "", fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+h.groqKey)
 
-	resp, err := groqHTTPClient.Do(req)
+	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("do request: %w", err)
 	}

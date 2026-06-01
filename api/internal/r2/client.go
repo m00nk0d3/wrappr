@@ -36,7 +36,7 @@ func New(accountID, accessKeyID, secretAccessKey, bucket string) (*Client, error
 	}
 
 	s3Client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		// Point all requests at the R2 account endpoint.
+				// Point all requests at the R2 account endpoint.
 		o.BaseEndpoint = aws.String(endpoint)
 		// Use path-style so the bucket name stays in the URL path rather than the hostname.
 		o.UsePathStyle = true
@@ -72,4 +72,16 @@ func (c *Client) Download(ctx context.Context, key string) (io.ReadCloser, error
 		return nil, fmt.Errorf("r2: download %q: %w", key, err)
 	}
 	return out.Body, nil
+}
+
+// Delete removes an object from R2 by key. It is a no-op if the key does not exist.
+func (c *Client) Delete(ctx context.Context, key string) error {
+	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("r2: delete %q: %w", key, err)
+	}
+	return nil
 }

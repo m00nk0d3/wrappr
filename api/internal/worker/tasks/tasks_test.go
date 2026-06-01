@@ -3,7 +3,6 @@ package tasks
 import (
 	"net/http"
 	"testing"
-	"time"
 )
 
 func TestAudioFilenameFromKey(t *testing.T) {
@@ -27,11 +26,15 @@ func TestAudioFilenameFromKey(t *testing.T) {
 	}
 }
 
-func TestGroqHTTPClientTimeout(t *testing.T) {
-	if groqHTTPClient.Timeout != 90*time.Second {
-		t.Errorf("groqHTTPClient.Timeout: want 90s, got %v", groqHTTPClient.Timeout)
+func TestNewProcessJobHandler_DefaultHTTPClient(t *testing.T) {
+	h := NewProcessJobHandler(nil, nil, "test-key")
+	if h.httpClient == nil {
+		t.Fatal("httpClient must not be nil")
 	}
-	if groqHTTPClient == http.DefaultClient {
-		t.Error("groqHTTPClient must not be http.DefaultClient")
+	if h.httpClient.Timeout != defaultGroqTimeout {
+		t.Errorf("httpClient.Timeout: want %v, got %v", defaultGroqTimeout, h.httpClient.Timeout)
+	}
+	if h.httpClient == http.DefaultClient {
+		t.Error("httpClient must not be http.DefaultClient")
 	}
 }

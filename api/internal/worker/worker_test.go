@@ -14,6 +14,7 @@ func TestParseRedisURL(t *testing.T) {
 		wantAddr  string
 		wantPw    string
 		wantTLS   bool
+		wantDB    int
 		wantError bool
 	}{
 		{
@@ -50,6 +51,23 @@ func TestParseRedisURL(t *testing.T) {
 			url:       "://bad",
 			wantError: true,
 		},
+		{
+			name:     "with database number",
+			url:      "redis://localhost:6379/2",
+			wantAddr: "localhost:6379",
+			wantDB:   2,
+		},
+		{
+			name:     "default database (no path)",
+			url:      "redis://localhost:6379",
+			wantAddr: "localhost:6379",
+			wantDB:   0,
+		},
+		{
+			name:      "invalid database number",
+			url:       "redis://localhost:6379/notanumber",
+			wantError: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -72,6 +90,10 @@ func TestParseRedisURL(t *testing.T) {
 			}
 			if opt.Password != tc.wantPw {
 				t.Errorf("Password: want %q, got %q", tc.wantPw, opt.Password)
+			}
+
+			if opt.DB != tc.wantDB {
+				t.Errorf("DB: want %d, got %d", tc.wantDB, opt.DB)
 			}
 
 			hasTLS := opt.TLSConfig != nil

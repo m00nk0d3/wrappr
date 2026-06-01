@@ -120,33 +120,52 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 			return
 		}
 
+		// uploadedKeys tracks every R2 object written in this request so they can
+		// be cleaned up if a later step (DB insert, task enqueue) fails.
+		var uploadedKeys []string
+		cleanupUploads := func() {
+			for _, k := range uploadedKeys {
+				if delErr := r2Client.Delete(ctx, k); delErr != nil {
+					log.Printf("jobs: cleanup R2 key %q: %v", k, delErr)
+				}
+			}
+		}
+
 		// ---- Upload audio to R2 ----
-		audioKey := fmt.Sprintf("jobs/%s/%s/%s", companyIDStr, keyPrefix, audioHeader.Filename)
+		// Use a deterministic key with only the file extension from the user-supplied
+		// filename to prevent path injection via browser-controlled filenames.
+		audioKey := fmt.Sprintf("jobs/%s/%s/audio%s", companyIDStr, keyPrefix, filepath.Ext(audioHeader.Filename))
 		if err := r2Client.Upload(ctx, audioKey, audioFile, audioContentType, audioHeader.Size); err != nil {
 			log.Printf("jobs: upload audio: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload audio"})
 			return
 		}
+		uploadedKeys = append(uploadedKeys, audioKey)
 
 		// ---- Upload photos to R2 (optional) ----
 		var photoKeys []string
 		if mf := c.Request.MultipartForm; mf != nil {
-			for _, fh := range mf.File["photos[]"] {
+			for i, fh := range mf.File["photos[]"] {
 				f, err := fh.Open()
 				if err != nil {
 					log.Printf("jobs: open photo %q: %v", fh.Filename, err)
+					cleanupUploads()
 					c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read photo file"})
 					return
 				}
 				ct := detectContentType(fh.Filename, fh.Header.Get("Content-Type"))
-				photoKey := fmt.Sprintf("jobs/%s/%s/photos/%s", companyIDStr, keyPrefix, fh.Filename)
+				// Use a positional key (photo_<i><ext>) so filenames with path separators
+				// or duplicate names cannot collide or traverse the key namespace.
+				photoKey := fmt.Sprintf("jobs/%s/%s/photos/photo_%d%s", companyIDStr, keyPrefix, i, filepath.Ext(fh.Filename))
 				if uploadErr := r2Client.Upload(ctx, photoKey, f, ct, fh.Size); uploadErr != nil {
 					f.Close()
 					log.Printf("jobs: upload photo %q: %v", fh.Filename, uploadErr)
+					cleanupUploads()
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload photo"})
 					return
 				}
 				f.Close()
+				uploadedKeys = append(uploadedKeys, photoKey)
 				photoKeys = append(photoKeys, photoKey)
 			}
 		}
@@ -174,6 +193,7 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		})
 		if err != nil {
 			log.Printf("jobs: create job: %v", err)
+			cleanupUploads()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			return
 		}
@@ -181,6 +201,7 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		jobIDStr, err := uuidString(job.ID)
 		if err != nil {
 			log.Printf("jobs: encode job ID: %v", err)
+			cleanupUploads()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			return
 		}
@@ -189,6 +210,7 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		payload, err := json.Marshal(pipeline.ProcessJobPayload{JobID: jobIDStr})
 		if err != nil {
 			log.Printf("jobs: marshal task payload: %v", err)
+			cleanupUploads()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			return
 		}
@@ -196,6 +218,15 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		task := asynq.NewTask(pipeline.TaskTypeProcessJob, payload, asynq.MaxRetry(3))
 		if _, err := asynqClient.Enqueue(task); err != nil {
 			log.Printf("jobs: enqueue task for job %s: %v", jobIDStr, err)
+			// Mark the job as failed so it does not sit in "queued" with no worker
+			// picking it up. The client will receive a 500 and can retry cleanly.
+			if _, statusErr := q.UpdateJobStatus(ctx, db.UpdateJobStatusParams{
+				ID:             job.ID,
+				PipelineStatus: "failed",
+			}); statusErr != nil {
+				log.Printf("jobs: mark job %s failed after enqueue error: %v", jobIDStr, statusErr)
+			}
+			cleanupUploads()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue job"})
 			return
 		}

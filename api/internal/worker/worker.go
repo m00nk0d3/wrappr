@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -144,6 +146,15 @@ func ParseRedisURL(rawURL string) (asynq.RedisClientOpt, error) {
 		if pw, ok := u.User.Password(); ok {
 			opt.Password = pw
 		}
+	}
+
+	// Parse optional Redis database number from the URL path (e.g. /1).
+	if db := strings.TrimPrefix(u.Path, "/"); db != "" {
+		n, err := strconv.Atoi(db)
+		if err != nil {
+			return asynq.RedisClientOpt{}, fmt.Errorf("redis URL %q invalid database number: %w", rawURL, err)
+		}
+		opt.DB = n
 	}
 
 	if u.Scheme == "rediss" {
