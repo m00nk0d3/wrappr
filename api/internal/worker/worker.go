@@ -127,7 +127,12 @@ func markJobFailed(pool *pgxpool.Pool, rawPayload []byte) error {
 }
 
 // ParseRedisURL converts a redis:// or rediss:// URL string into an asynq.RedisClientOpt.
-// rediss:// enables TLS — required for managed Redis providers (Upstash, Render, etc.).
+//
+// Supported URL forms:
+//   - redis://[:password@]host[:port][/db]   — plain TCP
+//   - rediss://[:password@]host[:port][/db]  — TLS (sets a non-nil TLSConfig)
+//
+// rediss:// is required for managed Redis providers that enforce TLS (Upstash, Render, etc.).
 // It is exported so the HTTP server can reuse the same parsing logic when
 // constructing an asynq.Client for enqueueing tasks.
 func ParseRedisURL(rawURL string) (asynq.RedisClientOpt, error) {

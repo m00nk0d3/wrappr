@@ -1,7 +1,11 @@
 package tasks
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -36,5 +40,85 @@ func TestNewProcessJobHandler_DefaultHTTPClient(t *testing.T) {
 	}
 	if h.httpClient == http.DefaultClient {
 		t.Error("httpClient must not be http.DefaultClient")
+	}
+	if h.groqURL != groqTranscriptionURL {
+		t.Errorf("groqURL: want %q, got %q", groqTranscriptionURL, h.groqURL)
+	}
+}
+
+// newTestHandler returns a ProcessJobHandler wired to srv for use in transcribeAudio tests.
+func newTestHandler(t *testing.T, srv *httptest.Server) *ProcessJobHandler {
+	t.Helper()
+	return &ProcessJobHandler{
+		groqKey:    "test-key",
+		httpClient: srv.Client(),
+		groqURL:    srv.URL,
+	}
+}
+
+func TestTranscribeAudio_Success(t *testing.T) {
+	want := "Technician replaced the water heater."
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("want POST, got %s", r.Method)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-key" {
+			t.Errorf("Authorization: want %q, got %q", "Bearer test-key", auth)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("parse multipart: %v", err)
+		}
+		fmt.Fprint(w, want)
+	}))
+	defer srv.Close()
+
+	h := newTestHandler(t, srv)
+	got, err := h.transcribeAudio(context.Background(), strings.NewReader("fake audio bytes"), "audio.webm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != want {
+		t.Errorf("transcript: want %q, got %q", want, got)
+	}
+}
+
+func TestTranscribeAudio_NonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	h := newTestHandler(t, srv)
+	_, err := h.transcribeAudio(context.Background(), strings.NewReader("fake audio"), "audio.webm")
+	if err == nil {
+		t.Fatal("expected error for non-200 response, got nil")
+	}
+}
+
+func TestTranscribeAudio_EmptyTranscript(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Intentionally empty body — simulates Groq returning no transcript.
+	}))
+	defer srv.Close()
+
+	h := newTestHandler(t, srv)
+	got, err := h.transcribeAudio(context.Background(), strings.NewReader("fake audio"), "audio.webm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("want empty transcript, got %q", got)
+	}
+}
+
+func TestTranscribeAudio_ServerUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.Close() // shut down immediately so requests fail with a connection error
+
+	h := newTestHandler(t, srv)
+	_, err := h.transcribeAudio(context.Background(), strings.NewReader("fake audio"), "audio.webm")
+	if err == nil {
+		t.Fatal("expected error for closed server, got nil")
 	}
 }

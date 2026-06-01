@@ -40,6 +40,9 @@ type ProcessJobHandler struct {
 	r2         *r2.Client
 	groqKey    string
 	httpClient *http.Client
+	// groqURL is the Groq transcription endpoint. Defaults to groqTranscriptionURL;
+	// overridable in tests to point at an httptest.Server.
+	groqURL string
 }
 
 // NewProcessJobHandler constructs a ProcessJobHandler with a default HTTP client.
@@ -49,6 +52,7 @@ func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey strin
 		r2:         r2Client,
 		groqKey:    groqKey,
 		httpClient: &http.Client{Timeout: defaultGroqTimeout},
+		groqURL:    groqTranscriptionURL,
 	}
 }
 
@@ -150,7 +154,7 @@ func (h *ProcessJobHandler) transcribeAudio(ctx context.Context, audioReader io.
 		pw.CloseWithError(err)
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, groqTranscriptionURL, pr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.groqURL, pr)
 	if err != nil {
 		pr.CloseWithError(err)
 		return "", fmt.Errorf("create request: %w", err)

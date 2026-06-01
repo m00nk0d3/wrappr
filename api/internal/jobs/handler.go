@@ -21,7 +21,9 @@ import (
 	"github.com/m00nk0d3/wrappr/api/internal/r2"
 )
 
-// maxUploadSize is the maximum total size of all uploaded files (32 MB).
+// maxUploadSize is the hard cap on the total request body size (32 MB).
+// Enforced by http.MaxBytesReader before parsing; also used as the in-memory
+// buffer threshold for ParseMultipartForm so larger payloads spill to temp files.
 const maxUploadSize = 32 << 20
 
 // defaultReportLanguage is used when the caller omits report_language.
@@ -45,9 +47,12 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		userIDStr := middleware.GetUserID(c)
 		companyIDStr := middleware.GetCompanyID(c)
 
-		// Parse the multipart form with a 32 MB in-memory limit.
+		// Enforce the hard body-size cap before parsing so oversized requests
+		// are rejected immediately rather than after buffering.
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize)
 		if err := c.Request.ParseMultipartForm(maxUploadSize); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse multipart form: " + err.Error()})
+			log.Printf("jobs: parse multipart form: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart form"})
 			return
 		}
 
@@ -220,6 +225,10 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 			log.Printf("jobs: enqueue task for job %s: %v", jobIDStr, err)
 			// Mark the job as failed so it does not sit in "queued" with no worker
 			// picking it up. The client will receive a 500 and can retry cleanly.
+			// Trade-off: R2 files are deleted (see cleanupUploads below) but the DB
+			// job record is retained with status=failed. The stale audio_url/photo_urls
+			// won't be accessed again because no worker picks up failed jobs; the
+			// record is kept for audit purposes.
 			if _, statusErr := q.UpdateJobStatus(ctx, db.UpdateJobStatusParams{
 				ID:             job.ID,
 				PipelineStatus: "failed",
