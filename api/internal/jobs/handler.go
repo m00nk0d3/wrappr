@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/m00nk0d3/wrappr/api/internal/db"
 	"github.com/m00nk0d3/wrappr/api/internal/middleware"
+	"github.com/m00nk0d3/wrappr/api/internal/pipeline"
 	"github.com/m00nk0d3/wrappr/api/internal/r2"
 )
 
@@ -25,14 +26,6 @@ const maxUploadSize = 32 << 20
 
 // defaultReportLanguage is used when the caller omits report_language.
 const defaultReportLanguage = "en"
-
-// TaskTypeProcessJob is the Asynq task type for the transcription pipeline.
-const TaskTypeProcessJob = "pipeline:process_job"
-
-// ProcessJobPayload is the JSON payload carried by a TaskTypeProcessJob task.
-type ProcessJobPayload struct {
-	JobID string `json:"job_id"`
-}
 
 // CreateHandler returns a Gin handler for POST /v1/jobs.
 //
@@ -193,14 +186,14 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		}
 
 		// ---- Enqueue Asynq task ----
-		payload, err := json.Marshal(ProcessJobPayload{JobID: jobIDStr})
+		payload, err := json.Marshal(pipeline.ProcessJobPayload{JobID: jobIDStr})
 		if err != nil {
 			log.Printf("jobs: marshal task payload: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			return
 		}
 
-		task := asynq.NewTask(TaskTypeProcessJob, payload, asynq.MaxRetry(3))
+		task := asynq.NewTask(pipeline.TaskTypeProcessJob, payload, asynq.MaxRetry(3))
 		if _, err := asynqClient.Enqueue(task); err != nil {
 			log.Printf("jobs: enqueue task for job %s: %v", jobIDStr, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue job"})
@@ -239,13 +232,12 @@ func randomHex(n int) (string, error) {
 }
 
 // isAllowedAudioType returns true for WebM and M4A/MP4 content types accepted
-// by the Groq Whisper API, plus a generic octet-stream fallback.
+// by the Groq Whisper API.
 func isAllowedAudioType(ct string) bool {
 	switch ct {
 	case "audio/webm", "video/webm",
 		"audio/mp4", "video/mp4",
-		"audio/m4a", "audio/x-m4a",
-		"application/octet-stream":
+		"audio/m4a", "audio/x-m4a":
 		return true
 	}
 	return false

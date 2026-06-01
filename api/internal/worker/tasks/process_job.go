@@ -11,12 +11,13 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/m00nk0d3/wrappr/api/internal/db"
-	"github.com/m00nk0d3/wrappr/api/internal/jobs"
+	"github.com/m00nk0d3/wrappr/api/internal/pipeline"
 	"github.com/m00nk0d3/wrappr/api/internal/r2"
 )
 
@@ -27,6 +28,11 @@ const (
 	// unclearTranscript is stored when Groq returns an empty transcript.
 	unclearTranscript = "Voice memo was unclear — technician notes unavailable."
 )
+
+// groqHTTPClient is used for all Groq API calls. The 90-second timeout covers
+// worst-case transcription latency for large audio files without letting a
+// stalled request hang the worker goroutine indefinitely.
+var groqHTTPClient = &http.Client{Timeout: 90 * time.Second}
 
 // ProcessJobHandler implements asynq.Handler for the "pipeline:process_job" task.
 // It downloads the job's audio from R2, sends it to Groq Whisper, and stores the
@@ -45,7 +51,7 @@ func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey strin
 // ProcessTask handles a single "pipeline:process_job" task.
 // Returning a non-nil error causes Asynq to retry the task automatically.
 func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
-	var payload jobs.ProcessJobPayload
+	var payload pipeline.ProcessJobPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		// Malformed payload — no point retrying.
 		return fmt.Errorf("process_job: unmarshal payload: %w", asynq.SkipRetry)
@@ -142,7 +148,7 @@ func (h *ProcessJobHandler) transcribeAudio(ctx context.Context, audioBytes []by
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+h.groqKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := groqHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("do request: %w", err)
 	}

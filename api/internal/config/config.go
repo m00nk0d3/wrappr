@@ -46,6 +46,7 @@ type Config struct {
 	R2Bucket string
 
 	// GroqAPIKey is the API key for the Groq Whisper transcription API.
+	// Optional at config load time; cmd/worker validates it is non-empty at startup.
 	GroqAPIKey string
 }
 
@@ -106,10 +107,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
-	groqAPIKey, err := requireEnv("GROQ_API_KEY")
-	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
-	}
+	groqAPIKey := os.Getenv("GROQ_API_KEY")
 
 	return &Config{
 		Port:              port,

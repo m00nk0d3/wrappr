@@ -4,14 +4,19 @@ import (
 	"testing"
 )
 
-// setRequiredEnvs sets the three new required environment variables so that
-// tests focused on PORT behaviour are not blocked by missing vars.
+// setRequiredEnvs sets all required environment variables so that
+// tests focused on specific behaviour are not blocked by missing vars.
 func setRequiredEnvs(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/test")
 	t.Setenv("APP_URL", "http://localhost:3001")
 	t.Setenv("RESEND_API_KEY", "re_test_key")
 	t.Setenv("JWT_SECRET", "test-jwt-secret-32-chars-minimum!!")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("R2_ACCOUNT_ID", "test-account-id")
+	t.Setenv("R2_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("R2_SECRET_ACCESS_KEY", "test-secret-key")
+	t.Setenv("R2_BUCKET", "test-bucket")
 }
 
 func TestLoad_DefaultPort(t *testing.T) {
@@ -80,6 +85,11 @@ func TestLoad_RequiredVars(t *testing.T) {
 		{"missing APP_URL", "APP_URL"},
 		{"missing RESEND_API_KEY", "RESEND_API_KEY"},
 		{"missing JWT_SECRET", "JWT_SECRET"},
+		{"missing REDIS_URL", "REDIS_URL"},
+		{"missing R2_ACCOUNT_ID", "R2_ACCOUNT_ID"},
+		{"missing R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"},
+		{"missing R2_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"},
+		{"missing R2_BUCKET", "R2_BUCKET"},
 	}
 
 	for _, tc := range cases {
@@ -92,6 +102,19 @@ func TestLoad_RequiredVars(t *testing.T) {
 				t.Errorf("expected error when %s is unset, got nil", tc.unset)
 			}
 		})
+	}
+}
+
+func TestLoad_GroqAPIKeyOptional(t *testing.T) {
+	setRequiredEnvs(t)
+	// GROQ_API_KEY is intentionally not set here.
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() should not fail when GROQ_API_KEY is absent, got: %v", err)
+	}
+	if cfg.GroqAPIKey != "" {
+		t.Errorf("expected empty GroqAPIKey, got %q", cfg.GroqAPIKey)
 	}
 }
 

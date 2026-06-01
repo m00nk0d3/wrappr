@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/m00nk0d3/wrappr/api/internal/config"
 	"github.com/m00nk0d3/wrappr/api/internal/db"
-	"github.com/m00nk0d3/wrappr/api/internal/jobs"
+	"github.com/m00nk0d3/wrappr/api/internal/pipeline"
 	"github.com/m00nk0d3/wrappr/api/internal/r2"
 	"github.com/m00nk0d3/wrappr/api/internal/worker/tasks"
 )
@@ -24,6 +25,10 @@ const workerConcurrency = 5
 // Start builds the Asynq server from cfg, registers all task handlers, and
 // blocks until ctx is cancelled. It returns only after the server has shut down.
 func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
+	if cfg.GroqAPIKey == "" {
+		return fmt.Errorf("worker: GROQ_API_KEY is required but not set")
+	}
+
 	redisOpt, err := ParseRedisURL(cfg.RedisURL)
 	if err != nil {
 		return fmt.Errorf("worker: %w", err)
@@ -41,7 +46,7 @@ func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
 	})
 
 	mux := asynq.NewServeMux()
-	mux.Handle(jobs.TaskTypeProcessJob, tasks.NewProcessJobHandler(pool, r2Client, cfg.GroqAPIKey))
+	mux.Handle(pipeline.TaskTypeProcessJob, tasks.NewProcessJobHandler(pool, r2Client, cfg.GroqAPIKey))
 
 	// Run the server in a goroutine and wait for context cancellation.
 	errCh := make(chan error, 1)
@@ -69,10 +74,9 @@ func retryDelay(n int, _ error, _ *asynq.Task) time.Duration {
 		return 30 * time.Second
 	case 2:
 		return 2 * time.Minute
-	case 3:
+	default:
 		return 10 * time.Minute
 	}
-	return asynq.DefaultRetryDelayFunc(n, nil, nil)
 }
 
 // makeErrorHandler returns an asynq.ErrorHandlerFunc that marks a job as
@@ -89,15 +93,17 @@ func makeErrorHandler(pool *pgxpool.Pool) func(ctx context.Context, task *asynq.
 		log.Printf("worker: task %s final failure (retried=%d): %v", task.Type(), retried, err)
 
 		// Best-effort status update — log on failure, don't block.
-		if markErr := markJobFailed(ctx, pool, task.Payload()); markErr != nil {
+		if markErr := markJobFailed(pool, task.Payload()); markErr != nil {
 			log.Printf("worker: mark job failed: %v", markErr)
 		}
 	}
 }
 
 // markJobFailed parses the job ID from rawPayload and sets pipeline_status="failed".
-func markJobFailed(ctx context.Context, pool *pgxpool.Pool, rawPayload []byte) error {
-	var payload jobs.ProcessJobPayload
+// context.Background() is used deliberately: the worker's ctx may already be
+// cancelled during shutdown, and we still want this best-effort DB update to land.
+func markJobFailed(pool *pgxpool.Pool, rawPayload []byte) error {
+	var payload pipeline.ProcessJobPayload
 	if err := json.Unmarshal(rawPayload, &payload); err != nil {
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
@@ -118,7 +124,8 @@ func markJobFailed(ctx context.Context, pool *pgxpool.Pool, rawPayload []byte) e
 	return nil
 }
 
-// ParseRedisURL converts a redis:// URL string into an asynq.RedisClientOpt.
+// ParseRedisURL converts a redis:// or rediss:// URL string into an asynq.RedisClientOpt.
+// rediss:// enables TLS — required for managed Redis providers (Upstash, Render, etc.).
 // It is exported so the HTTP server can reuse the same parsing logic when
 // constructing an asynq.Client for enqueueing tasks.
 func ParseRedisURL(rawURL string) (asynq.RedisClientOpt, error) {
@@ -137,6 +144,10 @@ func ParseRedisURL(rawURL string) (asynq.RedisClientOpt, error) {
 		if pw, ok := u.User.Password(); ok {
 			opt.Password = pw
 		}
+	}
+
+	if u.Scheme == "rediss" {
+		opt.TLSConfig = &tls.Config{}
 	}
 
 	return opt, nil

@@ -41,6 +41,7 @@ type Querier interface {
 	UpdateCompanySubscriptionStatus(ctx context.Context, arg UpdateCompanySubscriptionStatusParams) (Company, error)
 	UpdateJobPipeline(ctx context.Context, arg UpdateJobPipelineParams) (Job, error)
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (Job, error)
+	UpdateJobTranscript(ctx context.Context, arg UpdateJobTranscriptParams) (Job, error)
 	UseAuthToken(ctx context.Context, tokenHash string) (AuthToken, error)
 }
 
