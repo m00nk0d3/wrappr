@@ -37,10 +37,14 @@ type Querier interface {
 	ListJobsByTechnician(ctx context.Context, technicianID pgtype.UUID) ([]Job, error)
 	ListPipelineEventsByJob(ctx context.Context, jobID pgtype.UUID) ([]PipelineEvent, error)
 	ListUsersByCompany(ctx context.Context, companyID pgtype.UUID) ([]User, error)
+	// Clears audio_url and photo_urls for a job that failed during enqueue,
+	// so the DB record does not hold stale R2 keys for files that were deleted.
+	NullJobURLsAndFail(ctx context.Context, id pgtype.UUID) error
 	ResolveJobRecommendation(ctx context.Context, arg ResolveJobRecommendationParams) (JobRecommendation, error)
 	UpdateCompanySubscriptionStatus(ctx context.Context, arg UpdateCompanySubscriptionStatusParams) (Company, error)
 	UpdateJobPipeline(ctx context.Context, arg UpdateJobPipelineParams) (Job, error)
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (Job, error)
+	UpdateJobTranscript(ctx context.Context, arg UpdateJobTranscriptParams) (Job, error)
 	UseAuthToken(ctx context.Context, tokenHash string) (AuthToken, error)
 }
 

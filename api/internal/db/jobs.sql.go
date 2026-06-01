@@ -267,6 +267,22 @@ func (q *Queries) ListJobsByTechnician(ctx context.Context, technicianID pgtype.
 	return items, nil
 }
 
+const nullJobURLsAndFail = `-- name: NullJobURLsAndFail :exec
+UPDATE jobs
+SET pipeline_status = 'failed',
+    audio_url       = NULL,
+    photo_urls      = '{}',
+    updated_at      = NOW()
+WHERE id = $1
+`
+
+// Clears audio_url and photo_urls for a job that failed during enqueue,
+// so the DB record does not hold stale R2 keys for files that were deleted.
+func (q *Queries) NullJobURLsAndFail(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, nullJobURLsAndFail, id)
+	return err
+}
+
 const updateJobPipeline = `-- name: UpdateJobPipeline :one
 UPDATE jobs
 SET pipeline_status = $2,
@@ -392,6 +408,65 @@ type UpdateJobStatusParams struct {
 
 func (q *Queries) UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (Job, error) {
 	row := q.db.QueryRow(ctx, updateJobStatus, arg.ID, arg.PipelineStatus)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.TechnicianID,
+		&i.ClientName,
+		&i.ClientEmail,
+		&i.ClientPhone,
+		&i.JobAddress,
+		&i.JobLat,
+		&i.JobLng,
+		&i.JobType,
+		&i.TechnicianNotes,
+		&i.SubmittedAt,
+		&i.CompletedAt,
+		&i.PipelineStatus,
+		&i.AudioUrl,
+		&i.PhotoUrls,
+		&i.PdfUrl,
+		&i.EmailSentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Transcript,
+		&i.AiSummary,
+		&i.AiWorkPerformed,
+		&i.AiFollowUpNotes,
+		&i.AiWarrantyNotes,
+		&i.AiJobCategory,
+		&i.AiClientSentiment,
+		&i.AiLaborHours,
+		&i.AiFollowUpRequired,
+		&i.AiSafetyConcerns,
+		&i.AiTags,
+		&i.AiRawJson,
+		&i.AiModelUsed,
+		&i.AiProcessedAt,
+		&i.DetectedLanguage,
+		&i.ReportLanguage,
+	)
+	return i, err
+}
+
+const updateJobTranscript = `-- name: UpdateJobTranscript :one
+UPDATE jobs
+SET pipeline_status = $2,
+    transcript = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, company_id, technician_id, client_name, client_email, client_phone, job_address, job_lat, job_lng, job_type, technician_notes, submitted_at, completed_at, pipeline_status, audio_url, photo_urls, pdf_url, email_sent_at, created_at, updated_at, transcript, ai_summary, ai_work_performed, ai_follow_up_notes, ai_warranty_notes, ai_job_category, ai_client_sentiment, ai_labor_hours, ai_follow_up_required, ai_safety_concerns, ai_tags, ai_raw_json, ai_model_used, ai_processed_at, detected_language, report_language
+`
+
+type UpdateJobTranscriptParams struct {
+	ID             pgtype.UUID `json:"id"`
+	PipelineStatus string      `json:"pipeline_status"`
+	Transcript     pgtype.Text `json:"transcript"`
+}
+
+func (q *Queries) UpdateJobTranscript(ctx context.Context, arg UpdateJobTranscriptParams) (Job, error) {
+	row := q.db.QueryRow(ctx, updateJobTranscript, arg.ID, arg.PipelineStatus, arg.Transcript)
 	var i Job
 	err := row.Scan(
 		&i.ID,

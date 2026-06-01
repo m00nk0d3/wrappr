@@ -11,11 +11,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/m00nk0d3/wrappr/api/internal/auth"
 	"github.com/m00nk0d3/wrappr/api/internal/config"
+	"github.com/m00nk0d3/wrappr/api/internal/jobs"
 	"github.com/m00nk0d3/wrappr/api/internal/mailer"
 	"github.com/m00nk0d3/wrappr/api/internal/middleware"
+	"github.com/m00nk0d3/wrappr/api/internal/r2"
+	"github.com/m00nk0d3/wrappr/api/internal/worker"
 	"golang.org/x/time/rate"
 )
 
@@ -33,6 +37,18 @@ func main() {
 	}
 	defer pool.Close()
 
+	r2Client, err := r2.New(cfg.R2AccountID, cfg.R2AccessKeyID, cfg.R2SecretAccessKey, cfg.R2Bucket)
+	if err != nil {
+		log.Fatalf("failed to create R2 client: %v", err)
+	}
+
+	asynqRedisOpt, err := worker.ParseRedisURL(cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("failed to parse Redis URL: %v", err)
+	}
+	asynqClient := asynq.NewClient(asynqRedisOpt)
+	defer asynqClient.Close()
+
 	m := mailer.NewResend(cfg.ResendAPIKey)
 
 	// Context cancelled on SIGINT/SIGTERM — shared with background goroutines
@@ -41,7 +57,7 @@ func main() {
 	defer stop()
 
 	router := buildRouter()
-	registerAuthRoutes(router, pool, m, cfg.AppURL, cfg.JWTSecret, ctx)
+	registerAuthRoutes(router, pool, m, cfg.AppURL, cfg.JWTSecret, r2Client, asynqClient, ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
@@ -90,7 +106,7 @@ func buildRouter() *gin.Engine {
 // registerAuthRoutes adds authenticated/infrastructure routes that require
 // external dependencies (DB pool, mailer). Called from main after deps are
 // initialised so buildRouter stays independently testable.
-func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string, ctx context.Context) {
+func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer, appURL, jwtSecret string, r2Client *r2.Client, asynqClient *asynq.Client, ctx context.Context) {
 	// 5 magic-link requests per minute per IP (burst of 3).
 	magicLinkLimiter := middleware.NewIPRateLimiter(ctx, rate.Every(12*time.Second), 3)
 
@@ -113,6 +129,9 @@ func registerAuthRoutes(router *gin.Engine, pool *pgxpool.Pool, m mailer.Mailer,
 	{
 		teamGroup.POST("/invite", auth.InviteHandler(pool, m, appURL))
 	}
+
+	// Job submission — available to all authenticated users.
+	protected.POST("/jobs", jobs.CreateHandler(pool, r2Client, asynqClient))
 }
 
 // healthHandler responds with a simple liveness payload.

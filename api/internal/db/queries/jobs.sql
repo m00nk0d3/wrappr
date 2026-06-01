@@ -22,6 +22,24 @@ SET pipeline_status = $2, updated_at = NOW()
 WHERE id = $1
 RETURNING *;
 
+-- name: NullJobURLsAndFail :exec
+-- Clears audio_url and photo_urls for a job that failed during enqueue,
+-- so the DB record does not hold stale R2 keys for files that were deleted.
+UPDATE jobs
+SET pipeline_status = 'failed',
+    audio_url       = NULL,
+    photo_urls      = '{}',
+    updated_at      = NOW()
+WHERE id = $1;
+
+-- name: UpdateJobTranscript :one
+UPDATE jobs
+SET pipeline_status = $2,
+    transcript = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateJobPipeline :one
 UPDATE jobs
 SET pipeline_status = $2,
