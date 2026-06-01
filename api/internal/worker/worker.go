@@ -46,7 +46,7 @@ func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
 	})
 
 	mux := asynq.NewServeMux()
-	mux.Handle(pipeline.TaskTypeProcessJob, tasks.NewProcessJobHandler(pool, r2Client, cfg.GroqAPIKey))
+	mux.Handle(pipeline.TaskTypeProcessJob, tasks.NewProcessJobHandler(pool, r2Client, cfg.GroqAPIKey, cfg.GeminiAPIKey))
 
 	// Run the server in a goroutine and wait for context cancellation.
 	errCh := make(chan error, 1)
