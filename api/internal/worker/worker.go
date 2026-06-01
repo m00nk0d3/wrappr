@@ -22,8 +22,6 @@ import (
 	"github.com/m00nk0d3/wrappr/api/internal/worker/tasks"
 )
 
-const workerConcurrency = 5
-
 // Start builds the Asynq server from cfg, registers all task handlers, and
 // blocks until ctx is cancelled. It returns only after the server has shut down.
 func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
@@ -42,7 +40,7 @@ func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
 	}
 
 	srv := asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency:    workerConcurrency,
+		Concurrency:    cfg.WorkerConcurrency,
 		RetryDelayFunc: retryDelay,
 		ErrorHandler:   asynq.ErrorHandlerFunc(makeErrorHandler(pool)),
 	})

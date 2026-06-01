@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"log"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,6 +70,19 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		if !isAllowedAudioType(audioContentType) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "audio must be WebM or M4A/MP4"})
 			return
+		}
+
+		// ---- Validate photo content types up-front (fail fast before any uploads) ----
+		var photoFileHeaders []*multipart.FileHeader
+		if mf := c.Request.MultipartForm; mf != nil {
+			photoFileHeaders = mf.File["photos[]"]
+		}
+		for _, fh := range photoFileHeaders {
+			ct := detectContentType(fh.Filename, fh.Header.Get("Content-Type"))
+			if !isAllowedPhotoType(ct) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "photos must be JPEG, PNG, WebP, or HEIC"})
+				return
+			}
 		}
 
 		// ---- Required: client_name ----
@@ -149,30 +164,28 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 
 		// ---- Upload photos to R2 (optional) ----
 		var photoKeys []string
-		if mf := c.Request.MultipartForm; mf != nil {
-			for i, fh := range mf.File["photos[]"] {
-				f, err := fh.Open()
-				if err != nil {
-					log.Printf("jobs: open photo %q: %v", fh.Filename, err)
-					cleanupUploads()
-					c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read photo file"})
-					return
-				}
-				ct := detectContentType(fh.Filename, fh.Header.Get("Content-Type"))
-				// Use a positional key (photo_<i><ext>) so filenames with path separators
-				// or duplicate names cannot collide or traverse the key namespace.
-				photoKey := fmt.Sprintf("jobs/%s/%s/photos/photo_%d%s", companyIDStr, keyPrefix, i, filepath.Ext(fh.Filename))
-				if uploadErr := r2Client.Upload(ctx, photoKey, f, ct, fh.Size); uploadErr != nil {
-					f.Close()
-					log.Printf("jobs: upload photo %q: %v", fh.Filename, uploadErr)
-					cleanupUploads()
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload photo"})
-					return
-				}
-				f.Close()
-				uploadedKeys = append(uploadedKeys, photoKey)
-				photoKeys = append(photoKeys, photoKey)
+		for i, fh := range photoFileHeaders {
+			f, err := fh.Open()
+			if err != nil {
+				log.Printf("jobs: open photo %q: %v", fh.Filename, err)
+				cleanupUploads()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read photo file"})
+				return
 			}
+			ct := detectContentType(fh.Filename, fh.Header.Get("Content-Type"))
+			// Use a positional key (photo_<i><ext>) so filenames with path separators
+			// or duplicate names cannot collide or traverse the key namespace.
+			photoKey := fmt.Sprintf("jobs/%s/%s/photos/photo_%d%s", companyIDStr, keyPrefix, i, filepath.Ext(fh.Filename))
+			if uploadErr := r2Client.Upload(ctx, photoKey, f, ct, fh.Size); uploadErr != nil {
+				f.Close()
+				log.Printf("jobs: upload photo %q: %v", fh.Filename, uploadErr)
+				cleanupUploads()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload photo"})
+				return
+			}
+			f.Close()
+			uploadedKeys = append(uploadedKeys, photoKey)
+			photoKeys = append(photoKeys, photoKey)
 		}
 		if photoKeys == nil {
 			photoKeys = []string{} // keep the slice non-nil for DB
@@ -223,17 +236,11 @@ func CreateHandler(pool *pgxpool.Pool, r2Client *r2.Client, asynqClient *asynq.C
 		task := asynq.NewTask(pipeline.TaskTypeProcessJob, payload, asynq.MaxRetry(3))
 		if _, err := asynqClient.Enqueue(task); err != nil {
 			log.Printf("jobs: enqueue task for job %s: %v", jobIDStr, err)
-			// Mark the job as failed so it does not sit in "queued" with no worker
-			// picking it up. The client will receive a 500 and can retry cleanly.
-			// Trade-off: R2 files are deleted (see cleanupUploads below) but the DB
-			// job record is retained with status=failed. The stale audio_url/photo_urls
-			// won't be accessed again because no worker picks up failed jobs; the
-			// record is kept for audit purposes.
-			if _, statusErr := q.UpdateJobStatus(ctx, db.UpdateJobStatusParams{
-				ID:             job.ID,
-				PipelineStatus: "failed",
-			}); statusErr != nil {
-				log.Printf("jobs: mark job %s failed after enqueue error: %v", jobIDStr, statusErr)
+			// Null out the R2 keys in the DB: the files were deleted by cleanupUploads
+			// below, so keeping stale URLs in the record would be misleading.
+			// pipeline_status is set to "failed" so the record is clearly terminal.
+			if nullErr := q.NullJobURLsAndFail(ctx, job.ID); nullErr != nil {
+				log.Printf("jobs: null job %s URLs after enqueue error: %v", jobIDStr, nullErr)
 			}
 			cleanupUploads()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue job"})
@@ -252,14 +259,12 @@ func optText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
-// uuidString converts a pgtype.UUID to its canonical hyphenated hex form.
+// uuidString converts a pgtype.UUID to its canonical hyphenated string form.
 func uuidString(id pgtype.UUID) (string, error) {
 	if !id.Valid {
 		return "", fmt.Errorf("UUID is null")
 	}
-	b := id.Bytes
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+	return uuid.UUID(id.Bytes).String(), nil
 }
 
 // randomHex returns n random bytes encoded as a lowercase hex string (2n chars).
@@ -278,6 +283,15 @@ func isAllowedAudioType(ct string) bool {
 	case "audio/webm", "video/webm",
 		"audio/mp4", "video/mp4",
 		"audio/m4a", "audio/x-m4a":
+		return true
+	}
+	return false
+}
+
+// isAllowedPhotoType returns true for image content types accepted as job photos.
+func isAllowedPhotoType(ct string) bool {
+	switch ct {
+	case "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif":
 		return true
 	}
 	return false

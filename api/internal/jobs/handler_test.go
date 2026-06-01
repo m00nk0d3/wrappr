@@ -111,6 +111,25 @@ func TestCreateHandler_InvalidJobLng(t *testing.T) {
 	}
 }
 
+func TestCreateHandler_InvalidPhotoType(t *testing.T) {
+	router := newJobRouter()
+	// Valid audio + an invalid photo type (.pdf). Photo validation runs before
+	// UUID parsing so this must return 400 without needing a real JWT context.
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	audioPart, _ := w.CreateFormFile("audio", "voice.webm")
+	io.WriteString(audioPart, "fake-audio")
+	photoPart, _ := w.CreateFormFile("photos[]", "doc.pdf")
+	io.WriteString(photoPart, "fake-pdf")
+	w.WriteField("client_name", "Acme")
+	w.Close()
+
+	rec := doJobRequest(t, router, &body, w.FormDataContentType())
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // ---- Helper function unit tests ----
 
 func TestIsAllowedAudioType(t *testing.T) {
@@ -238,5 +257,27 @@ func TestUUIDString(t *testing.T) {
 				t.Errorf("want %q, got %q", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestIsAllowedPhotoType(t *testing.T) {
+	allowed := []string{"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+	for _, ct := range allowed {
+		if !isAllowedPhotoType(ct) {
+			t.Errorf("isAllowedPhotoType(%q): want true, got false", ct)
+		}
+	}
+
+	disallowed := []string{
+		"application/pdf",
+		"text/plain",
+		"audio/webm",
+		"image/gif",
+		"",
+	}
+	for _, ct := range disallowed {
+		if isAllowedPhotoType(ct) {
+			t.Errorf("isAllowedPhotoType(%q): want false, got true", ct)
+		}
 	}
 }

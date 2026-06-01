@@ -48,6 +48,10 @@ type Config struct {
 	// GroqAPIKey is the API key for the Groq Whisper transcription API.
 	// Optional at config load time; cmd/worker validates it is non-empty at startup.
 	GroqAPIKey string
+
+	// WorkerConcurrency is the number of concurrent Asynq task goroutines.
+	// Defaults to 5 when WORKER_CONCURRENCY is not set.
+	WorkerConcurrency int
 }
 
 // Load reads configuration from environment variables and returns a validated
@@ -109,6 +113,11 @@ func Load() (*Config, error) {
 
 	groqAPIKey := os.Getenv("GROQ_API_KEY")
 
+	workerConcurrency, err := optPosIntEnv("WORKER_CONCURRENCY", 5)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
 	return &Config{
 		Port:              port,
 		DatabaseURL:       databaseURL,
@@ -121,6 +130,7 @@ func Load() (*Config, error) {
 		R2SecretAccessKey: r2SecretAccessKey,
 		R2Bucket:          r2Bucket,
 		GroqAPIKey:        groqAPIKey,
+		WorkerConcurrency: workerConcurrency,
 	}, nil
 }
 
@@ -153,4 +163,19 @@ func loadPort() (string, error) {
 	}
 
 	return raw, nil
+}
+
+// optPosIntEnv reads an optional positive integer environment variable.
+// It returns def when the variable is absent or empty, and an error when
+// the value is present but not a positive integer.
+func optPosIntEnv(key string, def int) (int, error) {
+	raw, ok := os.LookupEnv(key)
+	if !ok || raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s %q is not a positive integer", key, raw)
+	}
+	return n, nil
 }

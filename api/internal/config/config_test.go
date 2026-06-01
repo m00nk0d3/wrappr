@@ -128,6 +128,55 @@ func TestLoad_ShortJWTSecret(t *testing.T) {
 	}
 }
 
+func TestLoad_WorkerConcurrencyDefault(t *testing.T) {
+	setRequiredEnvs(t)
+	t.Setenv("WORKER_CONCURRENCY", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.WorkerConcurrency != 5 {
+		t.Errorf("want default concurrency 5, got %d", cfg.WorkerConcurrency)
+	}
+}
+
+func TestLoad_WorkerConcurrencyCustom(t *testing.T) {
+	setRequiredEnvs(t)
+	t.Setenv("WORKER_CONCURRENCY", "20")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.WorkerConcurrency != 20 {
+		t.Errorf("want concurrency 20, got %d", cfg.WorkerConcurrency)
+	}
+}
+
+func TestLoad_WorkerConcurrencyInvalid(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"not a number", "abc"},
+		{"zero", "0"},
+		{"negative", "-1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setRequiredEnvs(t)
+			t.Setenv("WORKER_CONCURRENCY", tc.value)
+
+			_, err := Load()
+			if err == nil {
+				t.Errorf("expected error for WORKER_CONCURRENCY=%q, got nil", tc.value)
+			}
+		})
+	}
+}
+
 func TestLoad_AllVarsSet(t *testing.T) {
 	setRequiredEnvs(t)
 	t.Setenv("PORT", "4000")
