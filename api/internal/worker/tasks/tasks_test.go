@@ -338,12 +338,10 @@ func TestExtractJobData_GroqRateLimitFallsBackToGemini(t *testing.T) {
 	h := &ProcessJobHandler{
 		groqKey:       "groq-key",
 		geminiKey:     "gemini-key",
-		httpClient:    groqSrv.Client(), // both servers share transport in test
+		httpClient:    geminiSrv.Client(), // plain-HTTP client reaches both test servers
 		llmChatURL:    groqSrv.URL,
 		geminiChatURL: geminiSrv.URL,
 	}
-	// Use gemini's client so both servers are reachable.
-	h.httpClient = geminiSrv.Client()
 
 	result, model, err := h.extractJobData(context.Background(), "transcript", "en")
 	if err != nil {
@@ -446,7 +444,7 @@ func TestSanitizeUrgency(t *testing.T) {
 
 func TestNormalizeTags(t *testing.T) {
 	t.Run("lowercases and trims", func(t *testing.T) {
-		got := normalizeTags([]string{"  LEAK_REPAIR ", "Plumbing"}, 5)
+		got := normalizeTags([]string{"  LEAK_REPAIR ", "Plumbing"}, 5, nil)
 		if got[0] != "leak_repair" {
 			t.Errorf("want leak_repair, got %q", got[0])
 		}
@@ -456,30 +454,41 @@ func TestNormalizeTags(t *testing.T) {
 	})
 
 	t.Run("deduplicates", func(t *testing.T) {
-		got := normalizeTags([]string{"repair", "repair", "REPAIR"}, 5)
+		got := normalizeTags([]string{"repair", "repair", "REPAIR"}, 5, nil)
 		if len(got) != 1 {
 			t.Errorf("want 1 unique tag, got %d: %v", len(got), got)
 		}
 	})
 
 	t.Run("truncates to max", func(t *testing.T) {
-		got := normalizeTags([]string{"a", "b", "c", "d", "e", "f", "g"}, 5)
+		got := normalizeTags([]string{"a", "b", "c", "d", "e", "f", "g"}, 5, nil)
 		if len(got) != 5 {
 			t.Errorf("want 5 tags, got %d", len(got))
 		}
 	})
 
 	t.Run("skips empty strings", func(t *testing.T) {
-		got := normalizeTags([]string{"", "   ", "repair"}, 5)
+		got := normalizeTags([]string{"", "   ", "repair"}, 5, nil)
 		if len(got) != 1 || got[0] != "repair" {
 			t.Errorf("want [repair], got %v", got)
 		}
 	})
 
 	t.Run("nil input returns empty", func(t *testing.T) {
-		got := normalizeTags(nil, 5)
+		got := normalizeTags(nil, 5, nil)
 		if len(got) != 0 {
 			t.Errorf("want empty, got %v", got)
+		}
+	})
+
+	t.Run("filters out-of-vocabulary tags", func(t *testing.T) {
+		allowed := map[string]struct{}{"repair": {}, "inspection": {}}
+		got := normalizeTags([]string{"repair", "roofing", "INSPECTION", "unknown_tag"}, 5, allowed)
+		if len(got) != 2 {
+			t.Errorf("want 2 in-vocab tags, got %d: %v", len(got), got)
+		}
+		if got[0] != "repair" || got[1] != "inspection" {
+			t.Errorf("want [repair inspection], got %v", got)
 		}
 	})
 }

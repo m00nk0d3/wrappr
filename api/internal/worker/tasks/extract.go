@@ -117,9 +117,11 @@ type geminiResponse struct {
 	} `json:"candidates"`
 }
 
-// controlledTagVocabulary is the fixed set of tags the LLM must choose from.
-// Controlled vocabulary enables dashboard filtering and analytics (Decision 4 in issue #11).
-var controlledTagVocabulary = strings.Join([]string{
+// allowedTagsList is the ordered set of tags the LLM may return.
+// It is the single source of truth: the prompt string and the runtime filter
+// are both derived from this slice. Adding a tag here automatically makes it
+// accepted at extraction time and visible in the prompt constraint.
+var allowedTagsList = []string{
 	// Electrical
 	"panel_upgrade", "circuit_breaker", "wiring_repair", "outlet_install",
 	"lighting", "grounding", "safety_hazard",
@@ -139,7 +141,21 @@ var controlledTagVocabulary = strings.Join([]string{
 	"warranty_repair", "follow_up_required", "safety_concern",
 	"equipment_replaced", "permit_needed", "quote_provided",
 	"completed_successfully", "customer_complaint", "repeat_visit",
-}, ", ")
+}
+
+// allowedTagsSet is an O(1) lookup set built from allowedTagsList.
+// normalizeTags uses it to drop any tag the LLM returns outside the vocabulary.
+var allowedTagsSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(allowedTagsList))
+	for _, t := range allowedTagsList {
+		m[t] = struct{}{}
+	}
+	return m
+}()
+
+// controlledTagVocabulary is allowedTagsList joined as a comma-separated string
+// for inclusion in the LLM system prompt.
+var controlledTagVocabulary = strings.Join(allowedTagsList, ", ")
 
 // buildExtractionPrompt returns the system prompt and user message for LLM extraction.
 // reportLanguage is a BCP 47 language tag (e.g. "en", "pt-BR", "ar"); defaults to "en".
@@ -280,6 +296,9 @@ func (h *ProcessJobHandler) callGeminiLLM(ctx context.Context, systemPrompt, use
 		return "", fmt.Errorf("marshal gemini request: %w", err)
 	}
 
+	// Gemini authenticates via a ?key= query parameter — this is the official
+	// Google-documented auth pattern for the REST API. Note that the key will
+	// appear in server access logs; ensure those logs have appropriate access controls.
 	url := h.geminiChatURL + "?key=" + h.geminiKey
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -345,13 +364,20 @@ func sanitizeUrgency(s string) string {
 }
 
 // normalizeTags lowercases, deduplicates, and truncates to max tags.
-func normalizeTags(tags []string, max int) []string {
+// When allowed is non-nil, any tag not present in the set is silently dropped,
+// providing defense-in-depth against LLM responses outside the controlled vocabulary.
+func normalizeTags(tags []string, max int, allowed map[string]struct{}) []string {
 	seen := make(map[string]struct{}, len(tags))
 	result := make([]string, 0, max)
 	for _, t := range tags {
 		t = strings.ToLower(strings.TrimSpace(t))
 		if t == "" {
 			continue
+		}
+		if allowed != nil {
+			if _, ok := allowed[t]; !ok {
+				continue
+			}
 		}
 		if _, dup := seen[t]; dup {
 			continue

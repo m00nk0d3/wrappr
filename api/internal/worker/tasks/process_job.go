@@ -31,6 +31,11 @@ const (
 	// defaultGroqTimeout covers worst-case transcription latency for large audio
 	// files without letting a stalled request hang the worker goroutine indefinitely.
 	defaultGroqTimeout = 90 * time.Second
+
+	// defaultLLMTimeout is the per-call deadline for LLM chat completions.
+	// LLM calls should respond within seconds; a tighter bound lets Asynq retry
+	// sooner if the provider is degraded rather than waiting a full 90 s.
+	defaultLLMTimeout = 30 * time.Second
 )
 
 // ProcessJobHandler implements asynq.Handler for the "pipeline:process_job" task.
@@ -143,15 +148,23 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 
 	// 7. Extract structured data from the transcript using the LLM.
 	// report_language is set at job-creation time from company.default_language.
+	// A tighter timeout is used here so a stalled LLM call fails fast and lets
+	// Asynq retry sooner, independent of the transcription HTTP client timeout.
 	reportLanguage := job.ReportLanguage.String
-	extraction, modelUsed, err := h.extractJobData(ctx, transcript, reportLanguage)
+	llmCtx, llmCancel := context.WithTimeout(ctx, defaultLLMTimeout)
+	defer llmCancel()
+	extraction, modelUsed, err := h.extractJobData(llmCtx, transcript, reportLanguage)
 	if err != nil {
 		return fmt.Errorf("process_job: LLM extraction for job %s: %w", payload.JobID, err)
 	}
 
 	// 8. Compute derived values.
-	tags := normalizeTags(extraction.JobTags, maxTags)
-	rawJSON, _ := json.Marshal(extraction)
+	tags := normalizeTags(extraction.JobTags, maxTags, allowedTagsSet)
+	rawJSON, err := json.Marshal(extraction)
+	if err != nil {
+		log.Printf("process_job: marshal extraction JSON for job %s: %v — storing empty object", payload.JobID, err)
+		rawJSON = []byte("{}")
+	}
 	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 
 	var laborHours pgtype.Numeric
