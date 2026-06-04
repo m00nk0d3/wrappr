@@ -45,9 +45,14 @@ type Config struct {
 	// R2Bucket is the name of the R2 bucket used to store job files.
 	R2Bucket string
 
-	// GroqAPIKey is the API key for the Groq Whisper transcription API.
+	// GroqAPIKey is the API key for the Groq Whisper transcription API and
+	// LLaMA 3.3 70B chat completions.
 	// Optional at config load time; cmd/worker validates it is non-empty at startup.
 	GroqAPIKey string
+
+	// GeminiAPIKey is the API key for the Gemini 1.5 Flash API.
+	// Optional: when set, the worker falls back to Gemini if Groq returns HTTP 429.
+	GeminiAPIKey string
 
 	// WorkerConcurrency is the number of concurrent Asynq task goroutines.
 	// Defaults to 5 when WORKER_CONCURRENCY is not set.
@@ -112,6 +117,7 @@ func Load() (*Config, error) {
 	}
 
 	groqAPIKey := os.Getenv("GROQ_API_KEY")
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 
 	workerConcurrency, err := optPosIntEnv("WORKER_CONCURRENCY", 5)
 	if err != nil {
@@ -130,6 +136,7 @@ func Load() (*Config, error) {
 		R2SecretAccessKey: r2SecretAccessKey,
 		R2Bucket:          r2Bucket,
 		GroqAPIKey:        groqAPIKey,
+		GeminiAPIKey:      geminiAPIKey,
 		WorkerConcurrency: workerConcurrency,
 	}, nil
 }

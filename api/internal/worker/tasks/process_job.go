@@ -10,6 +10,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -30,29 +31,43 @@ const (
 	// defaultGroqTimeout covers worst-case transcription latency for large audio
 	// files without letting a stalled request hang the worker goroutine indefinitely.
 	defaultGroqTimeout = 90 * time.Second
+
+	// defaultLLMTimeout is the per-call deadline for LLM chat completions.
+	// LLM calls should respond within seconds; a tighter bound lets Asynq retry
+	// sooner if the provider is degraded rather than waiting a full 90 s.
+	defaultLLMTimeout = 30 * time.Second
 )
 
 // ProcessJobHandler implements asynq.Handler for the "pipeline:process_job" task.
-// It downloads the job's audio from R2, sends it to Groq Whisper, and stores the
-// resulting transcript in the database.
+// It downloads the job's audio from R2, sends it to Groq Whisper for transcription,
+// then calls the LLM to extract structured data and stores everything in the database.
 type ProcessJobHandler struct {
 	pool       *pgxpool.Pool
 	r2         *r2.Client
 	groqKey    string
+	geminiKey  string
 	httpClient *http.Client
-	// groqURL is the Groq transcription endpoint. Defaults to groqTranscriptionURL;
-	// overridable in tests to point at an httptest.Server.
+	// groqURL is the Groq Whisper transcription endpoint. Overridable in tests.
 	groqURL string
+	// llmChatURL is the Groq chat completions endpoint. Overridable in tests.
+	llmChatURL string
+	// geminiChatURL is the Gemini generateContent base URL. Overridable in tests.
+	geminiChatURL string
 }
 
 // NewProcessJobHandler constructs a ProcessJobHandler with a default HTTP client.
-func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey string) *ProcessJobHandler {
+// geminiKey is optional; when set, it enables Gemini 1.5 Flash as a fallback
+// if Groq returns HTTP 429 during LLM extraction.
+func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey, geminiKey string) *ProcessJobHandler {
 	return &ProcessJobHandler{
-		pool:       pool,
-		r2:         r2Client,
-		groqKey:    groqKey,
-		httpClient: &http.Client{Timeout: defaultGroqTimeout},
-		groqURL:    groqTranscriptionURL,
+		pool:          pool,
+		r2:            r2Client,
+		groqKey:       groqKey,
+		geminiKey:     geminiKey,
+		httpClient:    &http.Client{Timeout: defaultGroqTimeout},
+		groqURL:       groqTranscriptionURL,
+		llmChatURL:    groqChatURL,
+		geminiChatURL: geminiBaseURL,
 	}
 }
 
@@ -121,7 +136,120 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 		return fmt.Errorf("process_job: store transcript for job %s: %w", payload.JobID, err)
 	}
 
-	log.Printf("process_job: job %s transcribed successfully", payload.JobID)
+	log.Printf("process_job: job %s transcribed (%d chars) — starting LLM extraction", payload.JobID, len(transcript))
+
+	// 6. Mark as "extracting".
+	if _, err := q.UpdateJobStatus(ctx, db.UpdateJobStatusParams{
+		ID:             jobUUID,
+		PipelineStatus: "extracting",
+	}); err != nil {
+		return fmt.Errorf("process_job: update status to extracting for job %s: %w", payload.JobID, err)
+	}
+
+	// 7. Extract structured data from the transcript using the LLM.
+	// report_language is set at job-creation time from company.default_language.
+	// A tighter timeout is used here so a stalled LLM call fails fast and lets
+	// Asynq retry sooner, independent of the transcription HTTP client timeout.
+	reportLanguage := job.ReportLanguage.String
+	llmCtx, llmCancel := context.WithTimeout(ctx, defaultLLMTimeout)
+	defer llmCancel()
+	extraction, modelUsed, err := h.extractJobData(llmCtx, transcript, reportLanguage)
+	if err != nil {
+		return fmt.Errorf("process_job: LLM extraction for job %s: %w", payload.JobID, err)
+	}
+
+	// 8. Compute derived values.
+	tags := normalizeTags(extraction.JobTags, maxTags, allowedTagsSet)
+	rawJSON, err := json.Marshal(extraction)
+	if err != nil {
+		log.Printf("process_job: marshal extraction JSON for job %s: %v — storing empty object", payload.JobID, err)
+		rawJSON = []byte("{}")
+	}
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	var laborHours pgtype.Numeric
+	if extraction.LaborHoursEstimated != nil {
+		s := strconv.FormatFloat(*extraction.LaborHoursEstimated, 'f', 1, 64)
+		if err := laborHours.Scan(s); err != nil {
+			log.Printf("process_job: invalid labor_hours_estimated %v for job %s: %v", *extraction.LaborHoursEstimated, payload.JobID, err)
+		}
+	}
+
+	// Nil slices become SQL NULL; normalise to empty so the array columns are
+	// consistently non-null even when the LLM omits them.
+	if extraction.SafetyConcerns == nil {
+		extraction.SafetyConcerns = []string{}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+
+	// 9. Persist all AI-extracted fields and advance pipeline to "completed".
+	if _, err := q.UpdateJobPipeline(ctx, db.UpdateJobPipelineParams{
+		ID:                 jobUUID,
+		PipelineStatus:     "completed",
+		Transcript:         pgtype.Text{String: transcript, Valid: true},
+		AiSummary:          pgtype.Text{String: extraction.Summary, Valid: extraction.Summary != ""},
+		AiWorkPerformed:    pgtype.Text{String: extraction.WorkPerformed, Valid: extraction.WorkPerformed != ""},
+		AiFollowUpNotes:    pgtype.Text{String: extraction.FollowUpNotes, Valid: extraction.FollowUpNotes != ""},
+		AiWarrantyNotes:    pgtype.Text{String: extraction.WarrantyNotes, Valid: extraction.WarrantyNotes != ""},
+		AiJobCategory:      pgtype.Text{String: sanitizeCategory(extraction.JobCategory), Valid: extraction.JobCategory != ""},
+		AiClientSentiment:  pgtype.Text{String: sanitizeSentiment(extraction.ClientSentiment), Valid: extraction.ClientSentiment != ""},
+		AiLaborHours:       laborHours,
+		AiFollowUpRequired: extraction.FollowUpRequired,
+		AiSafetyConcerns:   extraction.SafetyConcerns,
+		AiTags:             tags,
+		AiRawJson:          rawJSON,
+		AiModelUsed:        pgtype.Text{String: modelUsed, Valid: true},
+		AiProcessedAt:      now,
+		PdfUrl:             pgtype.Text{},      // populated by PDF generation step (future issue)
+		EmailSentAt:        pgtype.Timestamptz{}, // populated by email step (future issue)
+		CompletedAt:        now,
+	}); err != nil {
+		return fmt.Errorf("process_job: store AI data for job %s: %w", payload.JobID, err)
+	}
+
+	// 10. Insert materials into job_materials (best-effort — log errors, don't fail).
+	for _, mat := range extraction.MaterialsUsed {
+		if mat.Name == "" {
+			continue
+		}
+		if _, err := q.CreateJobMaterial(ctx, db.CreateJobMaterialParams{
+			JobID:    jobUUID,
+			Name:     mat.Name,
+			Quantity: pgtype.Text{String: mat.Quantity, Valid: mat.Quantity != ""},
+			Unit:     pgtype.Text{String: mat.Unit, Valid: mat.Unit != ""},
+		}); err != nil {
+			log.Printf("process_job: insert material %q for job %s: %v", mat.Name, payload.JobID, err)
+		}
+	}
+
+	// 11. Insert recommendations into job_recommendations (best-effort).
+	for _, rec := range extraction.Recommendations {
+		if rec.Description == "" {
+			continue
+		}
+		if _, err := q.CreateJobRecommendation(ctx, db.CreateJobRecommendationParams{
+			JobID:              jobUUID,
+			Description:        rec.Description,
+			Urgency:            sanitizeUrgency(rec.Urgency),
+			EstimatedCostRange: pgtype.Text{String: rec.EstimatedCostRange, Valid: rec.EstimatedCostRange != ""},
+		}); err != nil {
+			log.Printf("process_job: insert recommendation for job %s: %v", payload.JobID, err)
+		}
+	}
+
+	// 12. Insert tags into job_tags (best-effort — unique constraint guards against duplicates).
+	for _, tag := range tags {
+		if _, err := q.CreateJobTag(ctx, db.CreateJobTagParams{
+			JobID: jobUUID,
+			Tag:   tag,
+		}); err != nil {
+			log.Printf("process_job: insert tag %q for job %s: %v", tag, payload.JobID, err)
+		}
+	}
+
+	log.Printf("process_job: job %s completed successfully (model: %s)", payload.JobID, modelUsed)
 	return nil
 }
 
