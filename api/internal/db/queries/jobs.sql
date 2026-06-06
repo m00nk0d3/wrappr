@@ -40,6 +40,15 @@ SET pipeline_status = $2,
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateJobPdf :one
+UPDATE jobs
+SET pdf_url         = $2,
+    pipeline_status = $3,
+    completed_at    = NOW(),
+    updated_at      = NOW()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateJobPipeline :one
 UPDATE jobs
 SET pipeline_status = $2,

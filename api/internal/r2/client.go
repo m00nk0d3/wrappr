@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -22,8 +23,9 @@ type s3API interface {
 
 // Client wraps the S3 client configured for Cloudflare R2.
 type Client struct {
-	s3     s3API
-	bucket string
+	s3      s3API
+	presign *s3.PresignClient
+	bucket  string
 }
 
 // New creates a new R2 Client using static credentials.
@@ -48,7 +50,7 @@ func New(accountID, accessKeyID, secretAccessKey, bucket string) (*Client, error
 		o.UsePathStyle = true
 	})
 
-	return &Client{s3: s3Client, bucket: bucket}, nil
+	return &Client{s3: s3Client, presign: s3.NewPresignClient(s3Client), bucket: bucket}, nil
 }
 
 // Upload streams body to R2 at key with contentType. size is the byte count of body
@@ -90,4 +92,18 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("r2: delete %q: %w", key, err)
 	}
 	return nil
+}
+
+// PresignGetURL returns a pre-signed GET URL for the object at key that is valid
+// for the given expiry duration. This allows external systems (e.g. Gotenberg)
+// to fetch private R2 objects without requiring long-lived credentials.
+func (c *Client) PresignGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("r2: presign %q: %w", key, err)
+	}
+	return req.URL, nil
 }

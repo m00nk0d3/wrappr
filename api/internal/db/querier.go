@@ -42,6 +42,7 @@ type Querier interface {
 	NullJobURLsAndFail(ctx context.Context, id pgtype.UUID) error
 	ResolveJobRecommendation(ctx context.Context, arg ResolveJobRecommendationParams) (JobRecommendation, error)
 	UpdateCompanySubscriptionStatus(ctx context.Context, arg UpdateCompanySubscriptionStatusParams) (Company, error)
+	UpdateJobPdf(ctx context.Context, arg UpdateJobPdfParams) (Job, error)
 	UpdateJobPipeline(ctx context.Context, arg UpdateJobPipelineParams) (Job, error)
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) (Job, error)
 	UpdateJobTranscript(ctx context.Context, arg UpdateJobTranscriptParams) (Job, error)

@@ -32,7 +32,7 @@ func TestAudioFilenameFromKey(t *testing.T) {
 }
 
 func TestNewProcessJobHandler_DefaultHTTPClient(t *testing.T) {
-	h := NewProcessJobHandler(nil, nil, "test-key", "")
+	h := NewProcessJobHandler(nil, nil, "test-key", "", nil)
 	if h.httpClient == nil {
 		t.Fatal("httpClient must not be nil")
 	}

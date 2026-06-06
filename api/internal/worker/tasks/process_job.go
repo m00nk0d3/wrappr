@@ -38,6 +38,12 @@ const (
 	defaultLLMTimeout = 30 * time.Second
 )
 
+// taskEnqueuer is the minimal subset of *asynq.Client used to enqueue tasks.
+// Extracted as an interface so unit tests can inject a no-op implementation.
+type taskEnqueuer interface {
+	Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
 // ProcessJobHandler implements asynq.Handler for the "pipeline:process_job" task.
 // It downloads the job's audio from R2, sends it to Groq Whisper for transcription,
 // then calls the LLM to extract structured data and stores everything in the database.
@@ -53,12 +59,15 @@ type ProcessJobHandler struct {
 	llmChatURL string
 	// geminiChatURL is the Gemini generateContent base URL. Overridable in tests.
 	geminiChatURL string
+	// enqueuer is used to enqueue the downstream PDF generation task.
+	enqueuer taskEnqueuer
 }
 
 // NewProcessJobHandler constructs a ProcessJobHandler with a default HTTP client.
 // geminiKey is optional; when set, it enables Gemini 1.5 Flash as a fallback
 // if Groq returns HTTP 429 during LLM extraction.
-func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey, geminiKey string) *ProcessJobHandler {
+// enqueuer is used to enqueue the generate_pdf task after successful extraction.
+func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey, geminiKey string, enqueuer taskEnqueuer) *ProcessJobHandler {
 	return &ProcessJobHandler{
 		pool:          pool,
 		r2:            r2Client,
@@ -68,6 +77,7 @@ func NewProcessJobHandler(pool *pgxpool.Pool, r2Client *r2.Client, groqKey, gemi
 		groqURL:       groqTranscriptionURL,
 		llmChatURL:    groqChatURL,
 		geminiChatURL: geminiBaseURL,
+		enqueuer:      enqueuer,
 	}
 }
 
@@ -184,10 +194,10 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 		tags = []string{}
 	}
 
-	// 9. Persist all AI-extracted fields and advance pipeline to "completed".
+	// 9. Persist all AI-extracted fields and advance pipeline to "extracted".
 	if _, err := q.UpdateJobPipeline(ctx, db.UpdateJobPipelineParams{
 		ID:                 jobUUID,
-		PipelineStatus:     "completed",
+		PipelineStatus:     "extracted",
 		Transcript:         pgtype.Text{String: transcript, Valid: true},
 		AiSummary:          pgtype.Text{String: extraction.Summary, Valid: extraction.Summary != ""},
 		AiWorkPerformed:    pgtype.Text{String: extraction.WorkPerformed, Valid: extraction.WorkPerformed != ""},
@@ -202,11 +212,25 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 		AiRawJson:          rawJSON,
 		AiModelUsed:        pgtype.Text{String: modelUsed, Valid: true},
 		AiProcessedAt:      now,
-		PdfUrl:             pgtype.Text{},      // populated by PDF generation step (future issue)
+		PdfUrl:             pgtype.Text{},        // populated by generate_pdf task
 		EmailSentAt:        pgtype.Timestamptz{}, // populated by email step (future issue)
-		CompletedAt:        now,
+		CompletedAt:        pgtype.Timestamptz{}, // set to NOW() by generate_pdf task on completion
 	}); err != nil {
 		return fmt.Errorf("process_job: store AI data for job %s: %w", payload.JobID, err)
+	}
+
+	// Enqueue the PDF generation task. Log failures but do not propagate — the
+	// job data has been saved and PDF generation can be retried independently.
+	if h.enqueuer != nil {
+		pdfPayload, merr := json.Marshal(pipeline.GeneratePDFPayload{JobID: payload.JobID})
+		if merr != nil {
+			log.Printf("process_job: marshal PDF payload for job %s: %v — skipping PDF enqueue", payload.JobID, merr)
+		} else {
+			pdfTask := asynq.NewTask(pipeline.TaskTypeGeneratePDF, pdfPayload)
+			if _, enqErr := h.enqueuer.Enqueue(pdfTask); enqErr != nil {
+				log.Printf("process_job: enqueue PDF task for job %s: %v", payload.JobID, enqErr)
+			}
+		}
 	}
 
 	// 10. Insert materials into job_materials (best-effort — log errors, don't fail).
@@ -249,7 +273,7 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 		}
 	}
 
-	log.Printf("process_job: job %s completed successfully (model: %s)", payload.JobID, modelUsed)
+	log.Printf("process_job: job %s extracted successfully (model: %s) — PDF task enqueued", payload.JobID, modelUsed)
 	return nil
 }
 
