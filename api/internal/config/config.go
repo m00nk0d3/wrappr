@@ -45,6 +45,16 @@ type Config struct {
 	// R2Bucket is the name of the R2 bucket used to store job files.
 	R2Bucket string
 
+	// GotenbergURL is the base URL of the Gotenberg service used for PDF generation.
+	// Optional; defaults to "http://localhost:3000" when GOTENBERG_URL is unset.
+	GotenbergURL string
+
+	// R2PublicURL is the public base URL for the R2 bucket, used to build the
+	// pdf_url stored in the database.
+	// e.g. "https://pub-XXXX.r2.dev" — the pdf_url will be {R2PublicURL}/{key}.
+	// Optional; when empty the pdf_url is set to the R2 key only.
+	R2PublicURL string
+
 	// GroqAPIKey is the API key for the Groq Whisper transcription API and
 	// LLaMA 3.3 70B chat completions.
 	// Optional at config load time; cmd/worker validates it is non-empty at startup.
@@ -119,6 +129,12 @@ func Load() (*Config, error) {
 	groqAPIKey := os.Getenv("GROQ_API_KEY")
 	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 
+	gotenbergURL := os.Getenv("GOTENBERG_URL")
+	if gotenbergURL == "" {
+		gotenbergURL = "http://localhost:3000"
+	}
+	r2PublicURL := os.Getenv("R2_PUBLIC_URL")
+
 	workerConcurrency, err := optPosIntEnv("WORKER_CONCURRENCY", 5)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -137,6 +153,8 @@ func Load() (*Config, error) {
 		R2Bucket:          r2Bucket,
 		GroqAPIKey:        groqAPIKey,
 		GeminiAPIKey:      geminiAPIKey,
+		GotenbergURL:      gotenbergURL,
+		R2PublicURL:       r2PublicURL,
 		WorkerConcurrency: workerConcurrency,
 	}, nil
 }

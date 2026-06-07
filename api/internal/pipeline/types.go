@@ -11,3 +11,11 @@ const TaskTypeProcessJob = "pipeline:process_job"
 type ProcessJobPayload struct {
 	JobID string `json:"job_id"`
 }
+
+// TaskTypeGeneratePDF is the Asynq task type for the PDF generation step.
+const TaskTypeGeneratePDF = "pipeline:generate_pdf"
+
+// GeneratePDFPayload is the JSON payload carried by a TaskTypeGeneratePDF task.
+type GeneratePDFPayload struct {
+	JobID string `json:"job_id"`
+}

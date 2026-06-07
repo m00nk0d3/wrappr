@@ -283,6 +283,66 @@ func (q *Queries) NullJobURLsAndFail(ctx context.Context, id pgtype.UUID) error 
 	return err
 }
 
+const updateJobPdf = `-- name: UpdateJobPdf :one
+UPDATE jobs
+SET pdf_url         = $2,
+    pipeline_status = $3,
+    completed_at    = NOW(),
+    updated_at      = NOW()
+WHERE id = $1
+RETURNING id, company_id, technician_id, client_name, client_email, client_phone, job_address, job_lat, job_lng, job_type, technician_notes, submitted_at, completed_at, pipeline_status, audio_url, photo_urls, pdf_url, email_sent_at, created_at, updated_at, transcript, ai_summary, ai_work_performed, ai_follow_up_notes, ai_warranty_notes, ai_job_category, ai_client_sentiment, ai_labor_hours, ai_follow_up_required, ai_safety_concerns, ai_tags, ai_raw_json, ai_model_used, ai_processed_at, detected_language, report_language
+`
+
+type UpdateJobPdfParams struct {
+	ID             pgtype.UUID `json:"id"`
+	PdfUrl         pgtype.Text `json:"pdf_url"`
+	PipelineStatus string      `json:"pipeline_status"`
+}
+
+func (q *Queries) UpdateJobPdf(ctx context.Context, arg UpdateJobPdfParams) (Job, error) {
+	row := q.db.QueryRow(ctx, updateJobPdf, arg.ID, arg.PdfUrl, arg.PipelineStatus)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.TechnicianID,
+		&i.ClientName,
+		&i.ClientEmail,
+		&i.ClientPhone,
+		&i.JobAddress,
+		&i.JobLat,
+		&i.JobLng,
+		&i.JobType,
+		&i.TechnicianNotes,
+		&i.SubmittedAt,
+		&i.CompletedAt,
+		&i.PipelineStatus,
+		&i.AudioUrl,
+		&i.PhotoUrls,
+		&i.PdfUrl,
+		&i.EmailSentAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Transcript,
+		&i.AiSummary,
+		&i.AiWorkPerformed,
+		&i.AiFollowUpNotes,
+		&i.AiWarrantyNotes,
+		&i.AiJobCategory,
+		&i.AiClientSentiment,
+		&i.AiLaborHours,
+		&i.AiFollowUpRequired,
+		&i.AiSafetyConcerns,
+		&i.AiTags,
+		&i.AiRawJson,
+		&i.AiModelUsed,
+		&i.AiProcessedAt,
+		&i.DetectedLanguage,
+		&i.ReportLanguage,
+	)
+	return i, err
+}
+
 const updateJobPipeline = `-- name: UpdateJobPipeline :one
 UPDATE jobs
 SET pipeline_status = $2,

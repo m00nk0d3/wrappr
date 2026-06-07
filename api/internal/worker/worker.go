@@ -39,6 +39,12 @@ func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
 		return fmt.Errorf("worker: create R2 client: %w", err)
 	}
 
+	// Create an asynq client so handlers can enqueue downstream tasks
+	// (e.g. process_job → generate_pdf). The client shares the same Redis
+	// connection options as the server.
+	enqueuer := asynq.NewClient(redisOpt)
+	defer enqueuer.Close()
+
 	srv := asynq.NewServer(redisOpt, asynq.Config{
 		Concurrency:    cfg.WorkerConcurrency,
 		RetryDelayFunc: retryDelay,
@@ -46,7 +52,8 @@ func Start(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
 	})
 
 	mux := asynq.NewServeMux()
-	mux.Handle(pipeline.TaskTypeProcessJob, tasks.NewProcessJobHandler(pool, r2Client, cfg.GroqAPIKey, cfg.GeminiAPIKey))
+	mux.Handle(pipeline.TaskTypeProcessJob, tasks.NewProcessJobHandler(pool, r2Client, cfg.GroqAPIKey, cfg.GeminiAPIKey, enqueuer))
+	mux.Handle(pipeline.TaskTypeGeneratePDF, tasks.NewGeneratePDFHandler(pool, r2Client, cfg.GotenbergURL, cfg.R2PublicURL))
 
 	// Run the server in a goroutine and wait for context cancellation.
 	errCh := make(chan error, 1)

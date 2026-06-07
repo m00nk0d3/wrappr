@@ -12,6 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.26.0
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/yuin/goldmark v1.8.2
 	golang.org/x/time v0.15.0
 )
 
