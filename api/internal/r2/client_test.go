@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -136,5 +137,61 @@ func TestDelete_Error(t *testing.T) {
 	err := c.Delete(context.Background(), "jobs/abc/audio.webm")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---- PresignGetURL ----
+
+// TestPresignGetURL_ReturnsSignedURL verifies that PresignGetURL produces a
+// non-empty, properly signed URL that embeds the requested object key.
+// Presigning is a local crypto operation — no network access is needed.
+func TestPresignGetURL_ReturnsSignedURL(t *testing.T) {
+	// Use syntactically valid but fictitious credentials; presigning never
+	// validates credentials against a live endpoint.
+	c, err := New(
+		"deadbeefcafebabe0123456789abcdef",
+		"AKIAIOSFODNN7EXAMPLE",
+		"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"test-bucket",
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	url, err := c.PresignGetURL(context.Background(), "jobs/company/job/photo.jpg", 15*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGetURL(): %v", err)
+	}
+	if url == "" {
+		t.Fatal("expected non-empty presigned URL")
+	}
+	if !strings.Contains(url, "X-Amz-Signature") {
+		t.Errorf("presigned URL %q missing X-Amz-Signature query param", url)
+	}
+	if !strings.Contains(url, "photo.jpg") {
+		t.Errorf("presigned URL %q does not embed the object key", url)
+	}
+}
+
+// TestPresignGetURL_IncludesExpiry verifies that the expiry duration is
+// reflected in the X-Amz-Expires parameter of the presigned URL.
+func TestPresignGetURL_IncludesExpiry(t *testing.T) {
+	c, err := New(
+		"deadbeefcafebabe0123456789abcdef",
+		"AKIAIOSFODNN7EXAMPLE",
+		"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"test-bucket",
+	)
+	if err != nil {
+		t.Fatalf("New(): %v", err)
+	}
+
+	url, err := c.PresignGetURL(context.Background(), "some/key.jpg", 10*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGetURL(): %v", err)
+	}
+	// 10 minutes = 600 seconds
+	if !strings.Contains(url, "X-Amz-Expires=600") {
+		t.Errorf("presigned URL %q does not contain X-Amz-Expires=600", url)
 	}
 }

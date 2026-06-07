@@ -221,15 +221,13 @@ func (h *ProcessJobHandler) ProcessTask(ctx context.Context, t *asynq.Task) erro
 
 	// Enqueue the PDF generation task. Log failures but do not propagate — the
 	// job data has been saved and PDF generation can be retried independently.
-	if h.enqueuer != nil {
-		pdfPayload, merr := json.Marshal(pipeline.GeneratePDFPayload{JobID: payload.JobID})
-		if merr != nil {
-			log.Printf("process_job: marshal PDF payload for job %s: %v — skipping PDF enqueue", payload.JobID, merr)
-		} else {
-			pdfTask := asynq.NewTask(pipeline.TaskTypeGeneratePDF, pdfPayload)
-			if _, enqErr := h.enqueuer.Enqueue(pdfTask); enqErr != nil {
-				log.Printf("process_job: enqueue PDF task for job %s: %v", payload.JobID, enqErr)
-			}
+	pdfPayload, merr := json.Marshal(pipeline.GeneratePDFPayload{JobID: payload.JobID})
+	if merr != nil {
+		log.Printf("process_job: marshal PDF payload for job %s: %v — skipping PDF enqueue", payload.JobID, merr)
+	} else {
+		pdfTask := asynq.NewTask(pipeline.TaskTypeGeneratePDF, pdfPayload)
+		if _, enqErr := h.enqueuer.Enqueue(pdfTask); enqErr != nil {
+			log.Printf("process_job: enqueue PDF task for job %s: %v", payload.JobID, enqErr)
 		}
 	}
 

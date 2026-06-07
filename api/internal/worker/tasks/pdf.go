@@ -110,7 +110,7 @@ func NewGeneratePDFHandler(pool *pgxpool.Pool, r2Client *r2.Client, gotenbergURL
 func (h *GeneratePDFHandler) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	var payload pipeline.GeneratePDFPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		return fmt.Errorf("generate_pdf: unmarshal payload: %w", asynq.SkipRetry)
+		return fmt.Errorf("generate_pdf: unmarshal payload %w: %w", err, asynq.SkipRetry)
 	}
 	if payload.JobID == "" {
 		return fmt.Errorf("generate_pdf: empty job_id: %w", asynq.SkipRetry)
@@ -320,6 +320,10 @@ func postToGotenberg(ctx context.Context, client *http.Client, gotenbergURL, htm
 
 // renderMarkdown converts a markdown string to sanitised HTML using goldmark.
 // The returned template.HTML is safe to embed directly in html/template output.
+//
+// goldmark strips raw HTML by default (unsafe mode is opt-in via
+// html.WithUnsafe()); do NOT enable unsafe mode here — AI-extracted content
+// must never bypass the built-in sanitisation.
 func renderMarkdown(md string) template.HTML {
 	if md == "" {
 		return ""
@@ -513,6 +517,12 @@ const reportHTMLTmpl = `<!DOCTYPE html>
     <div class="meta-item">
       <span class="meta-label">Labour Hours</span>
       <span class="meta-value">{{.LaborHours}}</span>
+    </div>
+    {{end}}
+    {{if .ClientSentiment}}
+    <div class="meta-item">
+      <span class="meta-label">Client Sentiment</span>
+      <span class="meta-value">{{.ClientSentiment}}</span>
     </div>
     {{end}}
     {{if .FollowUpRequired}}
